@@ -8,15 +8,33 @@ export const DeviceContext = createContext({
 });
 
 export const DeviceProvider = ({ children }) => {
-  const [devices, setDevices] = useState([]);
+  // 1) On first render, try to load saved devices from localStorage:
+  const [devices, setDevices] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ecotrack_devices');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
-  // Helper: merge‐update a single device by id, also stamping lastSeen
+  // 2) Whenever devices array changes, persist it to localStorage:
+  useEffect(() => {
+    try {
+      localStorage.setItem('ecotrack_devices', JSON.stringify(devices));
+    } catch {
+      // ignore write errors
+    }
+  }, [devices]);
+
+  // 3) Helper: merge‐update a single device by id, stamping lastSeen
   const mergeDevice = (partial) => {
     setDevices((prev) => {
       const idx = prev.findIndex((d) => d.id === partial.id);
       const now = Date.now();
+
       if (idx >= 0) {
-        // update existing device, preserving any other fields
+        // Update existing device, preserving other fields
         const copy = [...prev];
         copy[idx] = {
           ...copy[idx],
@@ -25,7 +43,7 @@ export const DeviceProvider = ({ children }) => {
         };
         return copy;
       } else {
-        // new device
+        // New device entry
         return [
           ...prev,
           {
@@ -37,13 +55,12 @@ export const DeviceProvider = ({ children }) => {
     });
   };
 
+  // 4) Set up MQTT subscription once on mount:
   useEffect(() => {
-    // 1) HiveMQ Cloud WSS URL
     const host = 'a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud';
     const port = 8884; // secure WebSocket port
-    const url  = `wss://${host}:${port}/mqtt`;
+    const url = `wss://${host}:${port}/mqtt`;
 
-    // 2) MQTT options (no need for protocolVersion here)
     const options = {
       username: 'prototype',
       password: 'Prototype1',
@@ -52,12 +69,11 @@ export const DeviceProvider = ({ children }) => {
       reconnectPeriod: 2000,
     };
 
-    // 3) Connect and subscribe to all sensor topics
     const client = mqtt.connect(url, options);
 
     client.on('connect', () => {
       console.log('🌐 DeviceProvider: MQTT connected');
-      client.subscribe('esp32/gps',      { qos: 1 });
+      client.subscribe('esp32/gps',           { qos: 1 });
       client.subscribe('esp32/sensor/flood',    { qos: 1 });
       client.subscribe('esp32/sensor/bin_full', { qos: 1 });
     });
@@ -70,7 +86,6 @@ export const DeviceProvider = ({ children }) => {
         return; // ignore invalid JSON
       }
 
-      // Whenever any message arrives for a device, call mergeDevice({ ... })
       if (
         topic === 'esp32/gps' &&
         typeof payload.id === 'string' &&
@@ -106,17 +121,16 @@ export const DeviceProvider = ({ children }) => {
     };
   }, []);
 
-  // ─── “Tick” state to force re-computation every second ───────────────────────
+  // 5) "Tick" state to force recalculation of active flags every second:
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const interval = setInterval(() => {
       setTick((t) => t + 1);
-    }, 1000); // every 1 second
-
+    }, 1000);
     return () => clearInterval(interval);
   }, []);
 
-  // Compute a new array where each device also has “active = (Date.now() - lastSeen < 5000)”
+  // 6) Compute devicesWithActive: each device has active = (Date.now() - lastSeen < 5000)
   const devicesWithActive = useMemo(() => {
     const now = Date.now();
     const THRESHOLD_MS = 5000; // 5 seconds
@@ -124,7 +138,7 @@ export const DeviceProvider = ({ children }) => {
       ...d,
       active: now - (d.lastSeen || 0) < THRESHOLD_MS,
     }));
-  }, [devices, tick]); // ▶️ include `tick` so this recalculates every second
+  }, [devices, tick]);
 
   return (
     <DeviceContext.Provider value={{ devices: devicesWithActive }}>
