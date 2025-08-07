@@ -1,36 +1,32 @@
-// src/LocationContext.js
 
-import React, { createContext, useState } from 'react';
+import React, { createContext, useState, useEffect } from 'react';
+import { realtimeDB } from './firebase';
+import { ref, onValue } from 'firebase/database';
 
-// Each entry in `locations` is { id: string, lat: number, lon: number }
 export const LocationContext = createContext({
-  locations: [],         // array of device locations
-  setLocations: () => {}, // setter to replace the entire array
-  addOrUpdateDevice: () => {}, // helper to add/update a single device
+  locations: [],
 });
 
 export const LocationProvider = ({ children }) => {
   const [locations, setLocations] = useState([]);
 
-  // Call this whenever a new { id, lat, lon } arrives from MQTT
-  const addOrUpdateDevice = (newDevice) => {
-    setLocations((prev) => {
-      const idx = prev.findIndex((d) => d.id === newDevice.id);
-      if (idx >= 0) {
-        // update existing
-        const updated = [...prev];
-        updated[idx] = newDevice;
-        return updated;
-      } else {
-        // add new
-        return [...prev, newDevice];
-      }
+  // Subscribe to /devices to extract lat/lon for map pins
+  useEffect(() => {
+    const devicesRef = ref(realtimeDB, 'devices');
+    const unsubscribe = onValue(devicesRef, (snapshot) => {
+      const data = snapshot.val() || {};
+      const locs = Object.entries(data)
+        .filter(([, obj]) => typeof obj.lat === 'number' && typeof obj.lon === 'number')
+        .map(([id, obj]) => ({ id, lat: obj.lat, lon: obj.lon }));
+      setLocations(locs);
     });
-  };
+    return () => unsubscribe();
+  }, []);
 
   return (
-    <LocationContext.Provider value={{ locations, setLocations, addOrUpdateDevice }}>
+    <LocationContext.Provider value={{ locations }}>
       {children}
     </LocationContext.Provider>
   );
 };
+  
