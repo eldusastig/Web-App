@@ -6,7 +6,7 @@ import { getDatabase } from 'firebase/database'; // ✅ import getDatabase
 const firebaseConfig = {
   apiKey: "AIzaSyDNRAlGi6IuUw2S9NL-0d7vmZbDfuGAeWI",
   authDomain: "mqtt-database-4c5ce.firebaseapp.com",
-  databaseURL: "https://mqtt-database-4c5ce-default-rtdb.asia-southeast1.firebasedatabase.app",
+  databaseURL: "https://mqtt-database-4c5ce-default-rtdb.asia-southeast1.firebasedatabase.app/",
   projectId: "mqtt-database-4c5ce",
   storageBucket: "mqtt-database-4c5ce.firebasestorage.app",
   messagingSenderId: "479417931412",
@@ -18,3 +18,4 @@ const app = initializeApp(firebaseConfig);
 
 // Export the Realtime Database instance
 export const realtimeDB = getDatabase(app);
+
