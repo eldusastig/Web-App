@@ -10,6 +10,7 @@ export const DeviceProvider = ({ children }) => {
 
   useEffect(() => {
     const devicesRef = ref(realtimeDB, 'devices');
+    console.log("VERSION 3.2.1 - new deploy");
     console.log('🔌 DeviceContext: subscribing to /devices');
     const unsubscribe = onValue(devicesRef, (snapshot) => {
       const data = snapshot.val();
@@ -35,3 +36,4 @@ export const DeviceProvider = ({ children }) => {
     </DeviceContext.Provider>
   );
 };
+
