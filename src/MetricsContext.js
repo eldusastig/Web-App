@@ -76,7 +76,7 @@ export const MetricsProvider = ({ children }) => {
   useEffect(() => {
     if (!authReady) return;
 
-    const url = wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt;
+    const url = 'wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt';
     const options = {
       username: 'prototype',
       password: 'Prototype1',
@@ -201,3 +201,4 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
+
