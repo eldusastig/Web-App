@@ -1,7 +1,7 @@
 // src/MetricsContext.js
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
-import { realtimeDB } from './firebase'; // ✅ shared DB instance
+import { realtimeDB } from './firebase';
 import { ref, onValue, update } from 'firebase/database';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
@@ -22,7 +22,7 @@ export const MetricsProvider = ({ children }) => {
   const activeDeviceIdRef = useRef(null);
   const clientRef = useRef(null);
 
-  // Ensure anonymous sign-in
+  // Ensure anonymous sign-in to satisfy DB rules
   useEffect(() => {
     const auth = getAuth();
     signInAnonymously(auth).catch(err => console.error('Auth error:', err));
@@ -31,45 +31,80 @@ export const MetricsProvider = ({ children }) => {
       if (user) {
         console.log('✅ Authenticated as', user.uid);
         setAuthReady(true);
+      } else {
+        setAuthReady(false);
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // Watch active device ID in Firebase
+  // Watch active device ID in Firebase (after auth)
   useEffect(() => {
     if (!authReady) return;
+
+    console.log('🏁 mounting activeDevice listener');
     const activeRef = ref(realtimeDB, 'activeDevice');
     const unsubActive = onValue(activeRef, snap => {
       const id = snap.val();
+      console.log('🔥 activeDevice snapshot:', id);
+
+      if (!id) {
+        // if cleared, disconnect MQTT if present
+        console.log('No active device. Disconnecting MQTT if present.');
+        activeDeviceIdRef.current = null;
+        if (clientRef.current) {
+          clientRef.current.end(true);
+          clientRef.current = null;
+        }
+        return;
+      }
+
       if (id && id !== activeDeviceIdRef.current) {
         activeDeviceIdRef.current = id;
         connectMqtt(id);
       }
     });
+
     return () => unsubActive();
   }, [authReady]);
 
-  // Listen to Firebase for other devices
+  // Listen to Firebase for non-active (historical) devices
   useEffect(() => {
     if (!authReady) return;
+
+    console.log('🏁 mounting devices listener');
     const devicesRef = ref(realtimeDB, 'devices');
     const unsubDevices = onValue(devicesRef, snap => {
+      console.log('🔥 devices snapshot:', snap.val());
       const data = snap.val() || {};
       const arr = Object.entries(data)
-        .filter(([id]) => activeDeviceIdRef.current ? id !== activeDeviceIdRef.current : true)
+        .filter(([id]) => (activeDeviceIdRef.current ? id !== activeDeviceIdRef.current : true))
         .map(([id, vals]) => ({ id, ...vals }));
+
       setDevices(prev => {
         const mqttDev = prev.find(d => d.id === activeDeviceIdRef.current);
         return mqttDev ? [mqttDev, ...arr] : arr;
       });
     });
+
     return () => unsubDevices();
   }, [authReady]);
 
+  // Connect MQTT for active device (subscribe to both topic styles)
   const connectMqtt = (deviceId) => {
+    // close previous
     if (clientRef.current) {
-      clientRef.current.end(true);
+      try {
+        clientRef.current.end(true);
+      } catch (e) {
+        console.warn('Error ending previous MQTT client', e);
+      }
+      clientRef.current = null;
+    }
+
+    if (!deviceId) {
+      console.warn('connectMqtt called with falsy deviceId');
+      return;
     }
 
     const url = `wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt`;
@@ -87,80 +122,111 @@ export const MetricsProvider = ({ children }) => {
 
     client.on('connect', () => {
       console.log('✅ MQTT connected for active device', deviceId);
-      ['gps', 'sensor/flood', 'sensor/bin_full', 'status'].forEach(topicSuffix => {
-        client.subscribe(`esp32/${deviceId}/${topicSuffix}`, { qos: 1 }, err => {
-          if (err) console.error('❌ subscribe failed on', topicSuffix, err);
+
+      // Preferred: subscribe to device-specific topics
+      const topicSuffixes = ['gps', 'sensor/flood', 'sensor/bin_full'];
+      topicSuffixes.forEach(suffix => {
+        const topicWithId = `esp32/${deviceId}/${suffix}`;
+        client.subscribe(topicWithId, { qos: 1 }, err => {
+          if (err) console.error('❌ subscribe failed on', topicWithId, err);
+          else console.log('Subscribed to', topicWithId);
         });
       });
+
+      // ALSO subscribe to the "short" topics (the pattern your original code used)
+      // This ensures compatibility if the ESP publishes to esp32/gps (and includes id in payload)
+      const shortTopics = ['esp32/gps', 'esp32/sensor/flood', 'esp32/sensor/bin_full'];
+      shortTopics.forEach(topic => {
+        client.subscribe(topic, { qos: 1 }, err => {
+          if (err) console.error('❌ subscribe failed on', topic, err);
+          else console.log('Subscribed to', topic);
+        });
+      });
+
+      // If you prefer a single catch-all, you can use: client.subscribe('esp32/#', { qos: 1 })
     });
 
     client.on('message', (topic, message) => {
+      const txt = (message || '').toString();
+      console.log('MQTT msg', topic, txt);
+
+      let payload;
       try {
-        const payload = JSON.parse(message.toString());
+        payload = JSON.parse(txt);
+      } catch (e) {
+        console.warn('Non-JSON payload received on', topic, txt);
+        return;
+      }
 
-        if (topic.endsWith('/status')) {
-          if (payload.status === 'offline') {
-            console.log(`⚠️ Device ${deviceId} went offline`);
-            update(ref(realtimeDB, `devices/${deviceId}`), {
-              connected: false,
-              lastSeen: Date.now(),
-            });
-            setDevices(prev =>
-              prev.map(d => d.id === deviceId ? { ...d, connected: false } : d)
-            );
-          }
-          return;
+      // Determine message device id:
+      // prefer payload.id, otherwise extract second path segment from topic: esp32/<id>/...
+      const parts = topic.split('/');
+      const topicId = parts.length >= 2 ? parts[1] : undefined;
+      const msgId = payload.id ?? topicId;
+
+      // If message id not present or doesn't match the active device, ignore
+      if (String(msgId) !== String(deviceId)) {
+        console.log('Message for different device', msgId, 'expected', deviceId);
+        return;
+      }
+
+      const now = Date.now();
+
+      setDevices(prev => {
+        const idx = prev.findIndex(d => String(d.id) === String(deviceId));
+        if (idx > -1) {
+          const updated = [...prev];
+          updated[idx] = { ...updated[idx], ...payload, lastSeen: now, id: deviceId };
+          return updated;
         }
+        // active/mqtt device at the front
+        return [{ ...payload, lastSeen: now, id: deviceId }, ...prev];
+      });
 
-        if (payload.id !== deviceId) return;
-
-        const now = Date.now();
-        setDevices(prev => {
-          const idx = prev.findIndex(d => d.id === deviceId);
-          if (idx > -1) {
-            const updated = [...prev];
-            updated[idx] = { ...updated[idx], ...payload, lastSeen: now, connected: true };
-            return updated;
-          }
-          return [...prev, { ...payload, lastSeen: now, connected: true }];
-        });
-
-        update(ref(realtimeDB, `devices/${deviceId}`), { ...payload, lastSeen: now, connected: true });
-      } catch {
-        console.warn('Invalid JSON on', topic);
+      // Update DB safely
+      try {
+        update(ref(realtimeDB, `devices/${deviceId}`), { ...payload, lastSeen: now })
+          .catch(err => console.warn('Firebase update failed', err));
+      } catch (e) {
+        console.warn('Firebase update exception', e);
       }
     });
 
-    client.on('close', () => {
-      console.log(`❌ MQTT disconnected for device ${deviceId}`);
-      update(ref(realtimeDB, `devices/${deviceId}`), { connected: false });
-      setDevices(prev =>
-        prev.map(d => d.id === deviceId ? { ...d, connected: false } : d)
-      );
-    });
-
     client.on('error', err => console.error('MQTT error', err));
+    client.on('close', () => console.log('MQTT connection closed for', deviceId));
+    client.on('reconnect', () => console.log('MQTT reconnecting...'));
   };
 
-  // Prune inactive devices
+  // Prune inactive devices every 10s (keep device seen within 30s)
   useEffect(() => {
     const interval = setInterval(() => {
       const cutoff = Date.now() - 30_000;
-      setDevices(prev =>
-        prev.map(d =>
-          d.lastSeen < cutoff ? { ...d, connected: false } : d
-        )
-      );
+      setDevices(prev => prev.filter(d => d.lastSeen >= cutoff));
     }, 10_000);
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => () => clientRef.current?.end(true), []);
-
+  // Cleanup MQTT on unmount
   useEffect(() => {
-    setActiveDevices(devices.filter(d => d.connected).length);
-    setFullBinAlerts(devices.filter(d => d.binFull && d.connected).length);
-    setFloodRisks(devices.filter(d => d.flooded && d.connected).length);
+    return () => {
+      try {
+        clientRef.current?.end(true);
+      } catch (e) {
+        console.warn('Error closing MQTT client on unmount', e);
+      }
+    };
+  }, []);
+
+  // Recompute metrics when devices list changes
+  useEffect(() => {
+    setActiveDevices(devices.length);
+    setFullBinAlerts(devices.filter(d => d.binFull).length);
+    setFloodRisks(devices.filter(d => d.flooded).length);
+    console.log('Metrics updated:', {
+      activeDevices: devices.length,
+      fullBinAlerts: devices.filter(d => d.binFull).length,
+      floodRisks: devices.filter(d => d.flooded).length,
+    });
   }, [devices]);
 
   return (
