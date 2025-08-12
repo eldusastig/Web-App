@@ -21,10 +21,6 @@ export const MetricsProvider = ({ children }) => {
 
   const clientRef = useRef(null);
 
-  // how long before a device is considered offline
-  const ACTIVE_CUTOFF_MS = 8_000;
-  const PRUNE_INTERVAL_MS = 5_000;
-
   // --- Firebase auth (still used for telemetry storage) ---
   useEffect(() => {
     const auth = getAuth();
@@ -41,7 +37,7 @@ export const MetricsProvider = ({ children }) => {
     return () => unsubscribe();
   }, []);
 
-  // --- Listen to Firebase devices (historical telemetry) and merge with local devices ---
+  // --- Firebase telemetry listener (no presence logic here) ---
   useEffect(() => {
     if (!authReady) return;
 
@@ -51,20 +47,16 @@ export const MetricsProvider = ({ children }) => {
       const data = snap.val() || {};
 
       setDevices(prev => {
-        // Build a map from prev for quick lookup (preserve online/lastSeen if present)
         const byId = new Map(prev.map(d => [String(d.id), { ...d }]));
 
         for (const [id, vals] of Object.entries(data)) {
           const key = String(id);
           if (byId.has(key)) {
-            // merge telemetry from Firebase into existing (preserve online/lastSeen)
             byId.set(key, { ...byId.get(key), ...vals, id: key });
           } else {
             byId.set(key, { id: key, ...vals, online: false });
           }
         }
-
-        // return array preserving recently-updated online items near front
         return Array.from(byId.values());
       });
     });
@@ -72,7 +64,7 @@ export const MetricsProvider = ({ children }) => {
     return () => unsubDevices();
   }, [authReady]);
 
-  // --- MQTT: connect and handle messages (presence + telemetry) ---
+  // --- MQTT connection (presence + telemetry) ---
   useEffect(() => {
     if (!authReady) return;
 
@@ -91,12 +83,11 @@ export const MetricsProvider = ({ children }) => {
 
     client.on('connect', () => {
       console.log('✅ MQTT connected');
-      // subscribe to your existing topics (no deviceId in topic)
       client.subscribe('esp32/gps', { qos: 1 });
       client.subscribe('esp32/sensor/flood', { qos: 1 });
       client.subscribe('esp32/sensor/bin_full', { qos: 1 });
 
-      // Also subscribe to per-device status if any device later uses that pattern
+      // status presence messages from all devices
       client.subscribe('esp32/+/status', { qos: 1 });
     });
 
@@ -105,93 +96,63 @@ export const MetricsProvider = ({ children }) => {
       let payload;
       try {
         payload = JSON.parse(txt);
-      } catch (e) {
+      } catch {
         console.warn('Invalid JSON payload on', topic, txt);
         return;
       }
 
-      // Determine device id:
-      // prefer payload.id (your ESP32 sends "id":"DVC001"), else try topic-based id (esp32/<id>/...)
       const parts = topic.split('/');
-      const topicId = parts.length >= 3 ? parts[1] : undefined; // handles esp32/<id>/...
-      const inferredId = payload.id ?? topicId ?? topic; // fallback to topic string if nothing else
-
-      const deviceId = String(inferredId);
+      const topicId = parts.length >= 3 ? parts[1] : undefined;
+      const deviceId = String(payload.id ?? topicId ?? topic);
 
       const now = Date.now();
 
-      // If it's a status message (esp32/<id>/status) follow online flag; else treat any telemetry message as "online"
-      const isStatusTopic = parts.length >= 3 && parts[2] === 'status';
-      const onlineFlag = isStatusTopic ? Boolean(payload.online) : true;
+      // If it's presence message from LWT
+      if (parts[2] === 'status') {
+        const onlineFlag =
+          payload.status?.toLowerCase() === 'online' ||
+          payload.online === true;
 
-      // Update Firebase for telemetry messages (keep using DB for flood/location/bin)
-      if (!isStatusTopic) {
-        // write telemetry into realtime DB under devices/<deviceId>
-        try {
-          update(ref(realtimeDB, `devices/${deviceId}`), { ...payload, lastSeen: now })
-            .catch(err => console.warn('Firebase update failed', err));
-        } catch (e) {
-          console.warn('Firebase update exception', e);
-        }
+        setDevices(prev => {
+          const idx = prev.findIndex(d => String(d.id) === deviceId);
+          if (idx > -1) {
+            const updated = [...prev];
+            updated[idx] = {
+              ...updated[idx],
+              id: deviceId,
+              online: onlineFlag,
+              lastSeen: onlineFlag ? now : updated[idx].lastSeen,
+            };
+            return updated;
+          }
+          return [{ id: deviceId, online: onlineFlag, lastSeen: onlineFlag ? now : null }, ...prev];
+        });
+        return;
       }
 
-      // Update local devices array (preserve other fields)
-      setDevices(prev => {
-        const idx = prev.findIndex(d => String(d.id) === deviceId);
-        if (idx > -1) {
-          const updated = [...prev];
-          updated[idx] = {
-            ...updated[idx],
-            ...payload,
-            id: deviceId,
-            lastSeen: now,
-            online: onlineFlag,
-          };
-          return updated;
-        }
-        // not found — push front so active ones are visible
-        return [{ id: deviceId, ...payload, lastSeen: now, online: onlineFlag }, ...prev];
-      });
+      // Otherwise it's telemetry → still send to Firebase
+      update(ref(realtimeDB, `devices/${deviceId}`), { ...payload, lastSeen: now })
+        .catch(err => console.warn('Firebase update failed', err));
     });
 
     client.on('error', err => console.error('MQTT error', err));
 
-    // clean up on unmount
     return () => {
-      try { client.end(true); } catch (e) { /* ignore */ }
+      try { client.end(true); } catch {}
     };
   }, [authReady]);
 
-  // --- prune/watchdog: mark offline if silent longer than cutoff ---
+  // --- Recompute metrics ---
   useEffect(() => {
-    const interval = setInterval(() => {
-      const cutoff = Date.now() - ACTIVE_CUTOFF_MS;
-      setDevices(prev => prev.map(d => {
-        const stillOnline = d.lastSeen && d.lastSeen >= cutoff;
-        if (d.online !== stillOnline) {
-          return { ...d, online: stillOnline };
-        }
-        return d;
-      }));
-    }, PRUNE_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, []);
-
-  // --- recompute metrics (time-aware) ---
-  useEffect(() => {
-    const cutoff = Date.now() - ACTIVE_CUTOFF_MS;
-    const activeList = devices.filter(d => d.lastSeen && d.lastSeen >= cutoff && d.online);
-
+    const activeList = devices.filter(d => d.online);
     setActiveDevices(activeList.length);
     setFullBinAlerts(devices.filter(d => d.binFull).length);
     setFloodRisks(devices.filter(d => d.flooded).length);
 
-    // debug log
     console.log('Metrics updated:', {
       activeDevices: activeList.length,
       fullBinAlerts: devices.filter(d => d.binFull).length,
       floodRisks: devices.filter(d => d.flooded).length,
-      devices,
     });
   }, [devices]);
 
@@ -201,5 +162,3 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
-
-
