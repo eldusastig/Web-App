@@ -22,7 +22,7 @@ export const MetricsProvider = ({ children }) => {
   const clientRef = useRef(null);
 
   // how long before a device is considered offline
-  const ACTIVE_CUTOFF_MS = 30_000;
+  const ACTIVE_CUTOFF_MS = 5_000;
   const PRUNE_INTERVAL_MS = 5_000;
 
   // --- Firebase auth (still used for telemetry storage) ---
@@ -201,3 +201,4 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
+
