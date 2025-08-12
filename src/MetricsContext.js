@@ -117,7 +117,6 @@ export const MetricsProvider = ({ children }) => {
       const inferredId = payload.id ?? topicId ?? topic; // fallback to topic string if nothing else
 
       const deviceId = String(inferredId);
-
       const now = Date.now();
 
       // If it's a status message (esp32/<id>/status) follow online flag; else treat any telemetry message as "online"
@@ -126,9 +125,8 @@ export const MetricsProvider = ({ children }) => {
 
       // Update Firebase for telemetry messages (keep using DB for flood/location/bin)
       if (!isStatusTopic) {
-        // write telemetry into realtime DB under devices/<deviceId>
         try {
-          update(ref(realtimeDB, devices/${deviceId}), { ...payload, lastSeen: now })
+          update(ref(realtimeDB, `devices/${deviceId}`), { ...payload, lastSeen: now })
             .catch(err => console.warn('Firebase update failed', err));
         } catch (e) {
           console.warn('Firebase update exception', e);
@@ -201,4 +199,3 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
-
