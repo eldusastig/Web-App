@@ -1,92 +1,74 @@
 // src/MetricsContext.js
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
-import { realtimeDB } from './firebase';  // ✅ import shared DB instance
+import { realtimeDB } from './firebase';
 import { ref, onValue, update } from 'firebase/database';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
 export const MetricsContext = createContext({
-  fullBinAlerts: null,
-  floodRisks: null,
-  activeDevices: null,
+  fullBinAlerts: 0,
+  floodRisks: 0,
+  activeDevices: 0,
   devices: [],
 });
 
 export const MetricsProvider = ({ children }) => {
   const [fullBinAlerts, setFullBinAlerts] = useState(0);
-  const [floodRisks, setFloodRisks]       = useState(0);
+  const [floodRisks, setFloodRisks] = useState(0);
   const [activeDevices, setActiveDevices] = useState(0);
-  const [devices, setDevices]             = useState([]);
-  const [authReady, setAuthReady]         = useState(false);
+  const [devices, setDevices] = useState([]);
+  const [authReady, setAuthReady] = useState(false);
 
-  const activeDeviceIdRef = useRef(null);
-  const clientRef         = useRef(null);
+  const clientRef = useRef(null);
 
-  // Ensure anonymous sign-in to satisfy DB rules
+  // --- Auth (unchanged) ---
   useEffect(() => {
     const auth = getAuth();
-    signInAnonymously(auth)
-      .catch(err => console.error('Auth error:', err));
-
+    signInAnonymously(auth).catch(err => console.error('Auth error:', err));
     const unsubscribe = onAuthStateChanged(auth, user => {
       if (user) {
         console.log('✅ Authenticated as', user.uid);
         setAuthReady(true);
+      } else {
+        setAuthReady(false);
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // Watch active device ID in Firebase (after auth)
+  // --- Firebase listener for historical telemetry (unchanged) ---
   useEffect(() => {
     if (!authReady) return;
-
-    console.log('🏁 mounting activeDevice listener');
-    const activeRef = ref(realtimeDB, 'activeDevice');
-    const unsubActive = onValue(activeRef, snap => {
-      console.log('🔥 activeDevice snapshot:', snap.val());
-      const id = snap.val();
-      if (id && id !== activeDeviceIdRef.current) {
-        activeDeviceIdRef.current = id;
-        connectMqtt(id);
-      }
-    });
-
-    return () => unsubActive();
-  }, [authReady]);
-
-  // Listen to Firebase for non-active (historical) devices
-  useEffect(() => {
-    if (!authReady) return;
-
-    console.log('🏁 mounting devices listener');
+    console.log('🏁 mounting devices listener (firebase)');
     const devicesRef = ref(realtimeDB, 'devices');
     const unsubDevices = onValue(devicesRef, snap => {
-      console.log('🔥 devices snapshot:', snap.val());
       const data = snap.val() || {};
-      const arr = Object.entries(data)
-        .filter(([id]) => activeDeviceIdRef.current ? id !== activeDeviceIdRef.current : true)
-        .map(([id, vals]) => ({ id, ...vals }));
-
+      const arr = Object.entries(data).map(([id, vals]) => ({ id, ...vals }));
+      // Merge with current devices, preferring in-memory (online/lastSeen) fields
       setDevices(prev => {
-        // preserve possible mqtt-driven online flag and lastSeen if present in prev
-        const mqttDev = prev.find(d => d.id === activeDeviceIdRef.current);
-        return mqttDev ? [mqttDev, ...arr] : arr;
+        const byId = new Map(prev.map(d => [String(d.id), { ...d }]));
+        for (const d of arr) {
+          const key = String(d.id);
+          if (byId.has(key)) {
+            byId.set(key, { ...d, ...byId.get(key), id: key }); // preserve online/lastSeen from memory
+          } else {
+            byId.set(key, { id: key, ...d, online: false });
+          }
+        }
+        return Array.from(byId.values());
       });
     });
-
     return () => unsubDevices();
   }, [authReady]);
 
-  // Connect MQTT for active device
-  const connectMqtt = (deviceId) => {
-    // close previous client if any
-    if (clientRef.current) {
-      try { clientRef.current.end(true); } catch (e) { /* ignore */ }
-      clientRef.current = null;
-    }
+  // --- Single global MQTT connection (presence + telemetry) ---
+  useEffect(() => {
+    if (!authReady) return;
 
-    const url = `wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt`;
+    // avoid duplicate clients
+    if (clientRef.current) return;
+
+    const url = 'wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt';
     const options = {
       username: 'prototype',
       password: 'Prototype1',
@@ -100,141 +82,116 @@ export const MetricsProvider = ({ children }) => {
     clientRef.current = client;
 
     client.on('connect', () => {
-      console.log('✅ MQTT connected for active device', deviceId);
+      console.log('✅ MQTT connected (global)');
+      // subscribe to telemetry: both "short" topics and per-device if used
+      client.subscribe('esp32/gps', { qos: 1 });
+      client.subscribe('esp32/sensor/flood', { qos: 1 });
+      client.subscribe('esp32/sensor/bin_full', { qos: 1 });
 
-      // telemetry topics (existing)
-      ['gps', 'sensor/flood', 'sensor/bin_full'].forEach(topicSuffix => {
-        client.subscribe(`esp32/${topicSuffix}`, { qos: 1 }, err => {
-          if (err) console.error('❌ subscribe failed on', topicSuffix, err);
-        });
-      });
+      // subscribe to per-device topics and presence LWT
+      client.subscribe('esp32/+/gps', { qos: 1 });
+      client.subscribe('esp32/+/sensor/flood', { qos: 1 });
+      client.subscribe('esp32/+/sensor/bin_full', { qos: 1 });
 
-      // critical: subscribe to status topics (LWT) so presence is instant
+      // crucial: presence via LWT retained messages
       client.subscribe('esp32/+/status', { qos: 1 }, err => {
         if (err) console.error('❌ subscribe failed on esp32/+/status', err);
-        else console.log('Subscribed to esp32/+/status (LWT presence)');
+        else console.log('Subscribed to esp32/+/status (presence)');
       });
     });
 
     client.on('message', (topic, message) => {
       const txt = (message || '').toString();
-      // defensive parse
       let payload;
       try {
         payload = JSON.parse(txt);
       } catch (e) {
-        console.warn('Invalid JSON on topic', topic, txt);
+        console.warn('Invalid JSON on', topic, txt);
         return;
       }
 
       const parts = topic.split('/');
-      // HANDLE STATUS (LWT) TOPICS FIRST: esp32/<id>/status
+      // 1) Handle presence topics (LWT) first: esp32/<id>/status
       if (parts.length >= 3 && parts[0] === 'esp32' && parts[2] === 'status') {
-        const idFromTopic = parts[1];
-        const id = String(payload.id ?? idFromTopic);
-
-        // status payloads could be { status: "online"/"offline" } or { online: true/false }
+        const id = payload.id ?? parts[1];
         const onlineFlag = (typeof payload.status === 'string')
           ? payload.status.toLowerCase() === 'online'
           : payload.online === true;
 
         const now = Date.now();
-        console.log('LWT status for', id, '=>', onlineFlag ? 'online' : 'offline');
+        console.log('Presence:', id, onlineFlag ? 'online' : 'offline');
 
         setDevices(prev => {
-          const idx = prev.findIndex(d => String(d.id) === id);
+          const idx = prev.findIndex(d => String(d.id) === String(id));
           if (idx > -1) {
             const updated = [...prev];
             updated[idx] = {
               ...updated[idx],
-              id,
+              id: String(id),
               online: onlineFlag,
               lastSeen: onlineFlag ? now : updated[idx].lastSeen,
             };
             return updated;
           }
-          // not found -> add it so UI sees the status quickly
-          return [{ id, online: onlineFlag, lastSeen: onlineFlag ? now : null }, ...prev];
+          // add entry quickly so UI can react
+          return [{ id: String(id), online: onlineFlag, lastSeen: onlineFlag ? now : null }, ...prev];
         });
 
-        // recompute activeDevices right away
-        setTimeout(() => {
-          setActiveDevices(prevDevices => {
-            // use the latest devices state (read via function to reduce race)
-            // but we also compute from the current 'devices' state variable
-            // safer: compute from devices via setDevices callback above; we'll just compute from latest devices variable
-            // immediate compute:
-            const active = (Array.isArray(devices) ? devices : []).filter(d => d.online).length;
-            // If device was just added above, the devices state may not include it yet — compute conservatively:
-            // count in-memory: traverse state + this id
-            const hasThis = (devices || []).some(d => String(d.id) === id && d.online);
-            const activeCount = hasThis ? active : (onlineFlag ? active + 1 : active - 0);
-            // set accurate value using actual devices state in next effect; this gives immediate feedback
-            return Math.max(0, activeCount);
-          });
-        }, 0);
-
-        return; // handled LWT; skip telemetry handling
+        // activeDevices will be recomputed from devices state via the effect below
+        return;
       }
 
-      // OTHERWISE: telemetry messages (gps/flood/bin) — original behavior:
-      // only accept telemetry for the currently active device (same as your original code)
-      if (payload.id !== deviceId) return;
+      // 2) Telemetry topics — accept both per-device topics (esp32/<id>/...) and short topics where payload.id exists
+      const deviceId = payload.id ?? (parts.length >= 2 ? parts[1] : undefined);
+      if (!deviceId) return; // we can't assign telemetry without an ID
 
       const now = Date.now();
+
+      // Merge telemetry into devices (preserve online flag if present)
       setDevices(prev => {
-        const idx = prev.findIndex(d => d.id === deviceId);
+        const idx = prev.findIndex(d => String(d.id) === String(deviceId));
         if (idx > -1) {
           const updated = [...prev];
-          updated[idx] = { ...updated[idx], ...payload, lastSeen: now, id: deviceId };
+          updated[idx] = { ...updated[idx], ...payload, id: String(deviceId), lastSeen: now, online: true };
           return updated;
         }
-        return [...prev, { ...payload, lastSeen: now, id: deviceId }];
+        return [{ id: String(deviceId), ...payload, lastSeen: now, online: true }, ...prev];
       });
 
-      // write telemetry to Firebase
+      // write telemetry to Firebase (unchanged)
       try {
-        update(ref(realtimeDB, `devices/${deviceId}`), { ...payload, lastSeen: now });
+        update(ref(realtimeDB, `devices/${deviceId}`), { ...payload, lastSeen: now })
+          .catch(err => console.warn('Firebase update failed', err));
       } catch (e) {
-        console.warn('Firebase update error', e);
+        console.warn('Firebase update exception', e);
       }
     });
 
     client.on('error', err => console.error('MQTT error', err));
-  };
 
-  // Prune inactive devices every 30s (keep the behavior you had)
+    return () => {
+      try { client.end(true); } catch (e) { /* ignore */ }
+      clientRef.current = null;
+    };
+  }, [authReady]);
+
+  // --- Prune stale devices every 10s (keeps array tidy) ---
   useEffect(() => {
     const interval = setInterval(() => {
-      const cutoff = Date.now() - 30000; // 30s
-      setDevices(prev => prev.filter(d => d.lastSeen >= cutoff));
+      const cutoff = Date.now() - 30000;
+      setDevices(prev => prev.filter(d => d.lastSeen && d.lastSeen >= cutoff));
     }, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // Cleanup MQTT on unmount — no optional chaining for compatibility
-  useEffect(() => {
-    return () => {
-      if (clientRef.current) {
-        try { clientRef.current.end(true); } catch (e) { /* ignore */ }
-        clientRef.current = null;
-      }
-    };
-  }, []);
-
-  // Recompute metrics — compute activeDevices from online flag
+  // --- Recompute metrics whenever devices changes (guarantees UI re-render) ---
   useEffect(() => {
     const activeCount = devices.filter(d => d.online).length;
     setActiveDevices(activeCount);
     setFullBinAlerts(devices.filter(d => d.binFull).length);
     setFloodRisks(devices.filter(d => d.flooded).length);
 
-    console.log('Metrics updated:', {
-      activeDevices: activeCount,
-      fullBinAlerts: devices.filter(d => d.binFull).length,
-      floodRisks: devices.filter(d => d.flooded).length,
-      devices,
-    });
+    console.log('Metrics updated:', { activeCount, fullBinAlerts: devices.filter(d => d.binFull).length, floodRisks: devices.filter(d => d.flooded).length, devices });
   }, [devices]);
 
   return (
