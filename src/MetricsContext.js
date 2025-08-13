@@ -1,7 +1,7 @@
 // src/MetricsContext.js
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
-import { realtimeDB } from './firebase';
+import { realtimeDB } from './firebase';  // ✅ import shared DB instance
 import { ref, onValue, update } from 'firebase/database';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
@@ -14,67 +14,79 @@ export const MetricsContext = createContext({
 
 export const MetricsProvider = ({ children }) => {
   const [fullBinAlerts, setFullBinAlerts] = useState(0);
-  const [floodRisks, setFloodRisks] = useState(0);
+  const [floodRisks, setFloodRisks]       = useState(0);
   const [activeDevices, setActiveDevices] = useState(0);
-  const [devices, setDevices] = useState([]);
-  const [authReady, setAuthReady] = useState(false);
+  const [devices, setDevices]             = useState([]);
+  const [authReady, setAuthReady]         = useState(false);
 
-  const clientRef = useRef(null);
+  const activeDeviceIdRef = useRef(null);
+  const clientRef         = useRef(null);
 
-  // how long before a device is considered offline
-  const ACTIVE_CUTOFF_MS = 5_000;
-  const PRUNE_INTERVAL_MS = 5_000;
-
-  // --- Firebase auth (still used for telemetry storage) ---
+  // Ensure anonymous sign-in to satisfy DB rules
   useEffect(() => {
     const auth = getAuth();
-    signInAnonymously(auth).catch(err => console.error('Auth error:', err));
+    signInAnonymously(auth)
+      .catch(err => console.error('Auth error:', err));
 
     const unsubscribe = onAuthStateChanged(auth, user => {
       if (user) {
         console.log('✅ Authenticated as', user.uid);
         setAuthReady(true);
-      } else {
-        setAuthReady(false);
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // --- Listen to Firebase devices (historical telemetry) and merge with local devices ---
+  // Watch active device ID in Firebase (after auth)
   useEffect(() => {
     if (!authReady) return;
 
-    console.log('🏁 mounting devices listener (firebase)');
+    console.log('🏁 mounting activeDevice listener');
+    const activeRef = ref(realtimeDB, 'activeDevice');
+    const unsubActive = onValue(activeRef, snap => {
+      console.log('🔥 activeDevice snapshot:', snap.val());
+      const id = snap.val();
+      if (id && id !== activeDeviceIdRef.current) {
+        activeDeviceIdRef.current = id;
+        connectMqtt(id);
+      }
+    });
+
+    return () => unsubActive();
+  }, [authReady]);
+
+  // Listen to Firebase for non-active (historical) devices
+  useEffect(() => {
+    if (!authReady) return;
+
+    console.log('🏁 mounting devices listener');
     const devicesRef = ref(realtimeDB, 'devices');
     const unsubDevices = onValue(devicesRef, snap => {
+      console.log('🔥 devices snapshot:', snap.val());
       const data = snap.val() || {};
+      const arr = Object.entries(data)
+        .filter(([id]) => activeDeviceIdRef.current ? id !== activeDeviceIdRef.current : true)
+        .map(([id, vals]) => ({ id, ...vals }));
 
       setDevices(prev => {
-        // Build a map from prev for quick lookup (preserve online/lastSeen if present)
-        const byId = new Map(prev.map(d => [String(d.id), { ...d }]));
-
-        for (const [id, vals] of Object.entries(data)) {
-          const key = String(id);
-          if (byId.has(key)) {
-            // merge telemetry from Firebase into existing (preserve online/lastSeen)
-            byId.set(key, { ...byId.get(key), ...vals, id: key });
-          } else {
-            byId.set(key, { id: key, ...vals, online: false });
-          }
-        }
-
-        // return array preserving recently-updated online items near front
-        return Array.from(byId.values());
+        const mqttDev = prev.find(d => d.id === activeDeviceIdRef.current);
+        return mqttDev ? [mqttDev, ...arr] : arr;
       });
     });
 
     return () => unsubDevices();
   }, [authReady]);
 
-  // --- MQTT: connect and handle messages (presence + telemetry) ---
-  useEffect(() => {
-    if (!authReady) return;
+  // Connect MQTT for active device
+  const connectMqtt = (deviceId) => {
+    if (clientRef.current) {
+      try {
+        clientRef.current.end(true);
+      } catch (e) {
+        console.warn('Error ending previous MQTT client', e);
+      }
+      clientRef.current = null;
+    }
 
     const url = 'wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt';
     const options = {
@@ -90,107 +102,104 @@ export const MetricsProvider = ({ children }) => {
     clientRef.current = client;
 
     client.on('connect', () => {
-      console.log('✅ MQTT connected');
-      // subscribe to your existing topics (no deviceId in topic)
-      client.subscribe('esp32/gps', { qos: 1 });
-      client.subscribe('esp32/sensor/flood', { qos: 1 });
-      client.subscribe('esp32/sensor/bin_full', { qos: 1 });
+      console.log('✅ MQTT connected for active device', deviceId);
+      ['gps', 'sensor/flood', 'sensor/bin_full'].forEach(topicSuffix => {
+        client.subscribe(`esp32/${topicSuffix}`, { qos: 1 }, err => {
+          if (err) console.error('❌ subscribe failed on', topicSuffix, err);
+        });
+      });
 
-      // Also subscribe to per-device status if any device later uses that pattern
-      client.subscribe('esp32/+/status', { qos: 1 });
-    });
-
-    client.on('message', (topic, message) => {
-      const txt = (message || '').toString();
-      let payload;
-      try {
-        payload = JSON.parse(txt);
-      } catch (e) {
-        console.warn('Invalid JSON payload on', topic, txt);
-        return;
-      }
-
-      // Determine device id:
-      // prefer payload.id (your ESP32 sends "id":"DVC001"), else try topic-based id (esp32/<id>/...)
-      const parts = topic.split('/');
-      const topicId = parts.length >= 3 ? parts[1] : undefined; // handles esp32/<id>/...
-      const inferredId = payload.id ?? topicId ?? topic; // fallback to topic string if nothing else
-
-      const deviceId = String(inferredId);
-      const now = Date.now();
-
-      // If it's a status message (esp32/<id>/status) follow online flag; else treat any telemetry message as "online"
-      const isStatusTopic = parts.length >= 3 && parts[2] === 'status';
-      const onlineFlag = isStatusTopic ? Boolean(payload.online) : true;
-
-      // Update Firebase for telemetry messages (keep using DB for flood/location/bin)
-      if (!isStatusTopic) {
-        try {
-          update(ref(realtimeDB, `devices/${deviceId}`), { ...payload, lastSeen: now })
-            .catch(err => console.warn('Firebase update failed', err));
-        } catch (e) {
-          console.warn('Firebase update exception', e);
-        }
-      }
-
-      // Update local devices array (preserve other fields)
-      setDevices(prev => {
-        const idx = prev.findIndex(d => String(d.id) === deviceId);
-        if (idx > -1) {
-          const updated = [...prev];
-          updated[idx] = {
-            ...updated[idx],
-            ...payload,
-            id: deviceId,
-            lastSeen: now,
-            online: onlineFlag,
-          };
-          return updated;
-        }
-        // not found — push front so active ones are visible
-        return [{ id: deviceId, ...payload, lastSeen: now, online: onlineFlag }, ...prev];
+      // Also subscribe to LWT/status topics so presence is instant
+      client.subscribe('esp32/+/status', { qos: 1 }, err => {
+        if (err) console.error('❌ subscribe failed on esp32/+/status', err);
       });
     });
 
+    client.on('message', (topic, message) => {
+      try {
+        const payload = JSON.parse(message.toString());
+        const parts = topic.split('/');
+
+        // If this is a per-device status (LWT) topic: esp32/<id>/status
+        if (parts.length >= 3 && parts[2] === 'status') {
+          const idFromTopic = parts[1];
+          const id = String(payload.id ?? idFromTopic ?? idFromTopic);
+          // status may be { status: "online"/"offline" } or { online: true/false }
+          const onlineFlag = (typeof payload.status === 'string')
+            ? payload.status.toLowerCase() === 'online'
+            : payload.online === true;
+
+          const now = Date.now();
+          setDevices(prev => {
+            const idx = prev.findIndex(d => String(d.id) === id);
+            if (idx > -1) {
+              const updated = [...prev];
+              updated[idx] = {
+                ...updated[idx],
+                id,
+                online: onlineFlag,
+                lastSeen: onlineFlag ? now : updated[idx].lastSeen,
+              };
+              return updated;
+            }
+            return [{ id, online: onlineFlag, lastSeen: onlineFlag ? now : null }, ...prev];
+          });
+
+          return;
+        }
+
+        // Otherwise it's telemetry (your previous behaviour):
+        // payload.id must match the active deviceId (we only subscribe to short topics)
+        if (payload.id !== deviceId) return;
+
+        const now = Date.now();
+        setDevices(prev => {
+          const idx = prev.findIndex(d => d.id === deviceId);
+          if (idx > -1) {
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], ...payload, lastSeen: now };
+            return updated;
+          }
+          return [...prev, { ...payload, lastSeen: now }];
+        });
+
+        update(ref(realtimeDB, `devices/${deviceId}`), { ...payload, lastSeen: now });
+      } catch (e) {
+        console.warn('Invalid JSON on', topic, e);
+      }
+    });
+
     client.on('error', err => console.error('MQTT error', err));
+  };
 
-    // clean up on unmount
-    return () => {
-      try { client.end(true); } catch (e) { /* ignore */ }
-    };
-  }, [authReady]);
-
-  // --- prune/watchdog: mark offline if silent longer than cutoff ---
+  // Prune inactive devices every 30s (keep the behavior you had)
   useEffect(() => {
     const interval = setInterval(() => {
-      const cutoff = Date.now() - ACTIVE_CUTOFF_MS;
-      setDevices(prev => prev.map(d => {
-        const stillOnline = d.lastSeen && d.lastSeen >= cutoff;
-        if (d.online !== stillOnline) {
-          return { ...d, online: stillOnline };
-        }
-        return d;
-      }));
-    }, PRUNE_INTERVAL_MS);
+      const cutoff = Date.now() - 30000;
+      setDevices(prev => prev.filter(d => d.lastSeen >= cutoff));
+    }, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // --- recompute metrics (time-aware) ---
+  // Cleanup MQTT on unmount
   useEffect(() => {
-    const cutoff = Date.now() - ACTIVE_CUTOFF_MS;
-    const activeList = devices.filter(d => d.lastSeen && d.lastSeen >= cutoff && d.online);
+    return () => {
+      if (clientRef.current) {
+        try {
+          clientRef.current.end(true);
+        } catch (e) {
+          /* ignore */
+        }
+      }
+    };
+  }, []);
 
-    setActiveDevices(activeList.length);
+  // Recompute metrics
+  useEffect(() => {
+    // activeDevices now derived from explicit 'online' flag (LWT presence)
+    setActiveDevices(devices.filter(d => d.online).length);
     setFullBinAlerts(devices.filter(d => d.binFull).length);
     setFloodRisks(devices.filter(d => d.flooded).length);
-
-    // debug log
-    console.log('Metrics updated:', {
-      activeDevices: activeList.length,
-      fullBinAlerts: devices.filter(d => d.binFull).length,
-      floodRisks: devices.filter(d => d.flooded).length,
-      devices,
-    });
   }, [devices]);
 
   return (
@@ -199,4 +208,3 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
-
