@@ -80,15 +80,10 @@ export const MetricsProvider = ({ children }) => {
   // Connect MQTT for active device
   const connectMqtt = (deviceId) => {
     if (clientRef.current) {
-      try {
-        clientRef.current.end(true);
-      } catch (e) {
-        console.warn('Error ending previous MQTT client', e);
-      }
-      clientRef.current = null;
+      clientRef.current.end(true);
     }
 
-    const url = 'wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt';
+    const url = `wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt`;
     const options = {
       username: 'prototype',
       password: 'Prototype1',
@@ -103,13 +98,15 @@ export const MetricsProvider = ({ children }) => {
 
     client.on('connect', () => {
       console.log('✅ MQTT connected for active device', deviceId);
+      // subscribe telemetry topics (your existing short-topic style)
       ['gps', 'sensor/flood', 'sensor/bin_full'].forEach(topicSuffix => {
         client.subscribe(`esp32/${topicSuffix}`, { qos: 1 }, err => {
           if (err) console.error('❌ subscribe failed on', topicSuffix, err);
         });
       });
 
-      // Also subscribe to LWT/status topics so presence is instant
+      // <-- NEW: subscribe to per-device LWT/status topics so presence is instant
+      // e.g. esp32/DVC001/status (retained LWT messages from ESP32)
       client.subscribe('esp32/+/status', { qos: 1 }, err => {
         if (err) console.error('❌ subscribe failed on esp32/+/status', err);
       });
@@ -175,24 +172,14 @@ export const MetricsProvider = ({ children }) => {
   // Prune inactive devices every 30s (keep the behavior you had)
   useEffect(() => {
     const interval = setInterval(() => {
-      const cutoff = Date.now() - 30000;
+      const cutoff = Date.now() - 30_000;
       setDevices(prev => prev.filter(d => d.lastSeen >= cutoff));
-    }, 10000);
+    }, 10_000);
     return () => clearInterval(interval);
   }, []);
 
   // Cleanup MQTT on unmount
-  useEffect(() => {
-    return () => {
-      if (clientRef.current) {
-        try {
-          clientRef.current.end(true);
-        } catch (e) {
-          /* ignore */
-        }
-      }
-    };
-  }, []);
+  useEffect(() => () => clientRef.current?.end(true), []);
 
   // Recompute metrics
   useEffect(() => {
