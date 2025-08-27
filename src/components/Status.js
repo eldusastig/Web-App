@@ -170,8 +170,8 @@ export default function Status() {
     if (!log) return null;
     const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
     const classes = log.classes &&(
-      Array.isArray(log.classes && logs.classes.length > 0 ) ||
-      (typeof log.classes== 'string' && logs.classes.trim() !== '')
+      Array.isArray(log.classes && log.classes.length > 0 ) ||
+      (typeof log.classes== 'string' && log.classes.trim() !== '')
     )
      ?'Rubbish Detected'
      : 'None' ;
