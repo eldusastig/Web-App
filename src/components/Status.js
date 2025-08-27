@@ -1,85 +1,238 @@
 // src/components/Status.jsx
-
-import React, { useContext, useState, useEffect } from 'react';
+import React, { useContext, useState, useEffect, useRef } from 'react';
 import { MetricsContext } from '../MetricsContext';
-import { DeviceContext } from '../DeviceContext';
-import { FiTrash2, FiPlusCircle, FiWifi } from 'react-icons/fi';
+import { realtimeDB } from '../firebase';
+import { ref as dbRef, remove, update } from 'firebase/database';
+import { FiTrash2, FiPlusCircle, FiWifi, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import { StyleSheet, css } from 'aphrodite';
 
 export default function Status() {
-  const { fullBinAlerts, floodRisks, activeDevices } = useContext(MetricsContext);
-  const { devices } = useContext(DeviceContext);
+  const { fullBinAlerts, floodRisks, activeDevices, devices, authReady } = useContext(MetricsContext);
   const [deviceAddresses, setDeviceAddresses] = useState({});
 
-  const displayValue = (val) =>
-    val === null || val === undefined ? 'Loading…' : val;
+  const fetchedAddrs = useRef(new Set());
+  const [expandedDevice, setExpandedDevice] = useState(null);
+  const [loadingLogs, setLoadingLogs] = useState({});
+  const [errorLogs, setErrorLogs] = useState({});
+  const [logsMap, setLogsMap] = useState({});
+
+  // Inline-confirm state
+  const [pendingDelete, setPendingDelete] = useState(null); // device id awaiting confirmation
+  const [deleting, setDeleting] = useState(false); // deletion in progress
+
+  const displayValue = (val) => (val === null || val === undefined ? 'Loading…' : val);
+
+  // defensive boolean helper: treat 'true'/'false' strings as booleans
+  const boolish = (v) => {
+    if (v === true) return true;
+    if (v === false) return false;
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === 'true' || s === '1' || s === '"true"') return true;
+      if (s === 'false' || s === '0' || s === '"false"') return false;
+      return false;
+    }
+    return Boolean(v);
+  };
 
   useEffect(() => {
     devices.forEach((d) => {
-      if (
-        d.lat != null &&
-        d.lon != null &&
-        deviceAddresses[d.id] === undefined
-      ) {
+      if (d.lat != null && d.lon != null && !fetchedAddrs.current.has(d.id)) {
+        fetchedAddrs.current.add(d.id);
         const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${d.lat}&lon=${d.lon}`;
         fetch(url)
           .then((res) => res.json())
           .then((data) => {
-            const street =
-              data.address?.road || data.display_name || 'Unknown address';
-            setDeviceAddresses((prev) => ({
-              ...prev,
-              [d.id]: street,
-            }));
+            const street = data.address?.road || data.display_name || 'Unknown address';
+            setDeviceAddresses((prev) => ({ ...prev, [d.id]: street }));
           })
           .catch(() => {
-            setDeviceAddresses((prev) => ({
-              ...prev,
-              [d.id]: 'Address unavailable',
-            }));
+            setDeviceAddresses((prev) => ({ ...prev, [d.id]: 'Address unavailable' }));
           });
       }
     });
-  }, [devices, deviceAddresses]);
+  }, [devices]);
 
   const realTimeAlerts = [];
   devices.forEach((d) => {
-    if (d.binFull) {
-      realTimeAlerts.push(`⚠️ Bin Full at Device ${d.id}`);
-    }
-    if (d.flooded) {
-      realTimeAlerts.push(`🌊 Flood Risk Detected at Device ${d.id}`);
-    }
+    if (boolish(d.binFull)) realTimeAlerts.push(`⚠️ Bin Full at Device ${d.id}`);
+    if (boolish(d.flooded)) realTimeAlerts.push(`🌊 Flood Risk Detected at Device ${d.id}`);
   });
+
+  const normalizeLog = (entry) => {
+    if (!entry) return null;
+    if (typeof entry === 'string') {
+      try {
+        const parsed = JSON.parse(entry);
+        if (parsed) {
+          return {
+            ts: parsed.ts ?? parsed.time ?? parsed.timestamp ?? null,
+            classes: parsed.classes ?? parsed.detected ?? parsed.items ?? null,
+            arrival: parsed.arrival ?? null,
+            raw: parsed,
+          };
+        }
+      } catch (e) {
+        return { ts: null, classes: null, arrival: null, raw: entry };
+      }
+    }
+    if (typeof entry === 'object') {
+      const ts = entry.ts ?? entry.time ?? entry.timestamp ?? null;
+      const classes = entry.classes ?? entry.detected ?? entry.items ?? null;
+      const arrival = entry.arrival ?? null;
+      return { ts, classes, arrival, raw: entry };
+    }
+    return { ts: null, classes: null, arrival: null, raw: String(entry) };
+  };
+
+  const loadLogsForDevice = async (device) => {
+    const id = device.id;
+    if (logsMap[id] || loadingLogs[id]) return;
+    if (Array.isArray(device.logs) && device.logs.length > 0) {
+      const normalized = device.logs.map(normalizeLog);
+      setLogsMap((m) => ({ ...m, [id]: normalized }));
+      return;
+    }
+
+    setLoadingLogs((m) => ({ ...m, [id]: true }));
+    setErrorLogs((m) => ({ ...m, [id]: null }));
+    try {
+      const res = await fetch(`/api/devices/${encodeURIComponent(id)}/logs`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const normalized = Array.isArray(json) ? json.map(normalizeLog) : [normalizeLog(json)];
+      setLogsMap((m) => ({ ...m, [id]: normalized }));
+    } catch (err) {
+      console.error('Failed to load logs for', id, err);
+      setErrorLogs((m) => ({ ...m, [id]: 'Failed to load logs' }));
+    } finally {
+      setLoadingLogs((m) => ({ ...m, [id]: false }));
+    }
+  };
+
+  const parseTsInfo = (rawTs) => {
+    if (rawTs == null) return { kind: 'unknown' };
+    if (rawTs instanceof Date && !isNaN(rawTs)) return { kind: 'epoch-ms', date: rawTs };
+    if (typeof rawTs === 'number' || (typeof rawTs === 'string' && /^\d+$/.test(rawTs.trim()))) {
+      const n = Number(rawTs);
+      if (n >= 1e12) return { kind: 'epoch-ms', date: new Date(n) };
+      if (n >= 1e9 && n < 1e12) return { kind: 'epoch-s', date: new Date(n * 1000) };
+      if (n >= 0 && n < 1e9) return { kind: 'uptime', uptimeMs: n };
+      return { kind: 'unknown' };
+    }
+    if (typeof rawTs === 'string') {
+      const trimmed = rawTs.trim();
+      const parsed = Date.parse(trimmed);
+      if (!isNaN(parsed)) return { kind: 'iso', date: new Date(parsed) };
+    }
+    return { kind: 'unknown' };
+  };
+
+  const formatUptime = (ms) => {
+    if (!isFinite(ms) || ms < 0) return 'uptime: —';
+    const s = Math.floor(ms / 1000);
+    const hours = Math.floor(s / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const secs = s % 60;
+    if (hours > 0) return `uptime: ${hours}h ${mins}m ${secs}s`;
+    if (mins > 0) return `uptime: ${mins}m ${secs}s`;
+    return `uptime: ${secs}s`;
+  };
+
+  const formatLogTimestamp = (log, device) => {
+    const info = parseTsInfo(log?.ts);
+    if (info.kind === 'epoch-ms' || info.kind === 'epoch-s' || info.kind === 'iso') {
+      try { return info.date.toLocaleString(); } catch (e) { return info.date.toString(); }
+    }
+    if (info.kind === 'uptime') {
+      const arrivalMs = (log && log.arrival) || (device && device.lastSeen) || Date.now();
+      const estDate = new Date(arrivalMs);
+      const uptimeStr = formatUptime(info.uptimeMs);
+      try {
+        return `${estDate.toLocaleString()} (${uptimeStr})`;
+      } catch (e) {
+        return `${estDate.toString()} (${uptimeStr})`;
+      }
+    }
+    return '—';
+  };
+
+  const onToggleDevice = (d) => {
+    if (expandedDevice === d.id) {
+      setExpandedDevice(null);
+      return;
+    }
+    setExpandedDevice(d.id);
+    loadLogsForDevice(d);
+  };
+
+  const renderLogItem = (log, idx, device) => {
+    if (!log) return null;
+    const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
+    const classes = log.classes
+      ? Array.isArray(log.classes)
+        ? log.classes.join(', ')
+        : String(log.classes)
+      : (typeof log.raw === 'string' ? log.raw : JSON.stringify(log.raw));
+    return (
+      <div key={idx} className={css(styles.logItem)}>
+        <div className={css(styles.logTimestamp)}>{tsStr || '—'}</div>
+        <div className={css(styles.logClasses)}>{classes}</div>
+      </div>
+    );
+  };
+
+  // ---------- Inline confirm + delete handlers ----------
+  const startDelete = (e, deviceId) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    setPendingDelete(deviceId);
+  };
+
+  const cancelDelete = (e) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    setPendingDelete(null);
+  };
+
+  const performDelete = async (e, deviceId) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    console.log('[Status] performDelete called for', deviceId, { authReady });
+    if (!authReady) {
+      console.warn('[Status] performDelete: auth not ready');
+      alert('Not authenticated yet. Please wait a moment and try again.');
+      setPendingDelete(null);
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      await remove(dbRef(realtimeDB, `devices/${deviceId}`));
+      console.log('[Status] hard remove success for', deviceId);
+      // UI will refresh from Firebase onValue listener
+      alert(`Device ${deviceId} removed.`);
+    } catch (err) {
+      console.warn('[Status] hard remove failed, falling back to soft-disable:', err);
+      try {
+        await update(dbRef(realtimeDB, `devices/${deviceId}`), { disabled: true });
+        console.log('[Status] soft-disable success for', deviceId);
+        alert(`Device ${deviceId} marked disabled.`);
+      } catch (err2) {
+        console.error('[Status] soft-disable also failed:', err2);
+        alert('Failed to delete device. Check console for errors (Firebase rules/auth).');
+      }
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
+    }
+  };
 
   return (
     <div className={css(styles.statusContainer)}>
-      {/* ─ Top Widgets ─ */}
       <div className={css(styles.widgetGrid)}>
-        <Widget
-          icon={<FiTrash2 />}
-          title="Full Bin Alerts"
-          value={`${displayValue(fullBinAlerts)} Alert${
-            fullBinAlerts === 1 ? '' : 's'
-          }`}
-        />
-        <Widget
-          icon={<FiPlusCircle />}
-          title="Flood Risk"
-          value={`${displayValue(floodRisks)} Alert${
-            floodRisks === 1 ? '' : 's'
-          }`}
-        />
-        <Widget
-          icon={<FiWifi />}
-          title="Active Devices"
-          value={`${displayValue(activeDevices)} Device${
-            activeDevices === 1 ? '' : 's'
-          }`}
-        />
+        <Widget icon={<FiTrash2 />} title="Full Bin Alerts" value={`${displayValue(fullBinAlerts)} Alert${fullBinAlerts === 1 ? '' : 's'}`} />
+        <Widget icon={<FiPlusCircle />} title="Flood Risk" value={`${displayValue(floodRisks)} Alert${floodRisks === 1 ? '' : 's'}`} />
+        <Widget icon={<FiWifi />} title="Active Devices" value={`${displayValue(activeDevices)} Device${activeDevices === 1 ? '' : 's'}`} />
       </div>
 
-      {/* ─ Device Table ─ */}
       <div className={css(styles.deviceHealth)}>
         <h2>Device Health</h2>
         <table className={css(styles.deviceTable)}>
@@ -90,47 +243,115 @@ export default function Status() {
               <th>Flooded</th>
               <th>Bin Full</th>
               <th>Active</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {devices.map((d) => (
-              <tr key={d.id}>
-                <td>{d.id}</td>
-                <td>
-                  {d.lat != null && d.lon != null
-                    ? deviceAddresses[d.id] || 'Loading address…'
-                    : '—'}
-                </td>
-                <td className={css(d.flooded ? styles.alert : styles.ok)}>
-                  {d.flooded ? 'Yes' : 'No'}
-                </td>
-                <td className={css(d.binFull ? styles.alert : styles.ok)}>
-                  {d.binFull ? 'Yes' : 'No'}
-                </td>
-                <td className={css(d.active ? styles.ok : styles.alert)}>
-                  {d.active ? 'Yes' : 'No'}
-                </td>
-              </tr>
-            ))}
+            {devices.map((d) => {
+              const isDisabled = boolish(d.disabled);
+              const isExpanded = expandedDevice === d.id;
+              const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0
+                ? d.logs.map(normalizeLog)
+                : (logsMap[d.id] || []);
+
+              return (
+                <React.Fragment key={d.id}>
+                  <tr
+                    className={css(styles.deviceRow, isDisabled ? styles.disabledRow : null)}
+                    onClick={() => onToggleDevice(d)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onToggleDevice(d); }}
+                  >
+                    <td className={css(styles.deviceIdCell)}>
+                      <span className={css(styles.expandIcon)}>{isExpanded ? <FiChevronUp /> : <FiChevronDown />}</span>
+                      {d.id} {isDisabled && <span className={css(styles.disabledBadge)}>Disabled</span>}
+                    </td>
+                    <td>{d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—'}</td>
+                    <td className={css(boolish(d.flooded) ? styles.alert : styles.ok)}>{boolish(d.flooded) ? 'Yes' : 'No'}</td>
+                    <td className={css(boolish(d.binFull) ? styles.alert : styles.ok)}>{boolish(d.binFull) ? 'Yes' : 'No'}</td>
+                    <td className={css(boolish(d.active) || boolish(d.online) ? styles.ok : styles.alert)}>{boolish(d.active) || boolish(d.online) ? 'Yes' : 'No'}</td>
+
+                    {/* Actions cell: stop row-level clicks and show inline confirm when needed */}
+                    <td onClick={(e) => e.stopPropagation()}>
+                      {pendingDelete === d.id ? (
+                        <div className={css(styles.inlineConfirm)}>
+                          <span>Confirm delete?</span>
+                          <button
+                            type="button"
+                            className={css(styles.confirmBtn)}
+                            onClick={(e) => performDelete(e, d.id)}
+                            disabled={deleting}
+                          >
+                            {deleting ? 'Deleting…' : 'Yes'}
+                          </button>
+                          <button
+                            type="button"
+                            className={css(styles.cancelBtn)}
+                            onClick={(e) => cancelDelete(e)}
+                            disabled={deleting}
+                          >
+                            No
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className={css(styles.deleteBtn)}
+                          onClick={(e) => startDelete(e, d.id)}
+                          disabled={!authReady || deleting}
+                          aria-disabled={!authReady || deleting}
+                          title={!authReady ? 'Waiting for auth...' : `Delete device ${d.id}`}
+                          data-test-delete={`delete-${d.id}`}
+                        >
+                          <FiTrash2 />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+
+                  {isExpanded && (
+                    <tr className={css(styles.expandedRow)}>
+                      <td colSpan="6">
+                        <div className={css(styles.expandedPanel)}>
+                          <div className={css(styles.panelHeader)}>
+                            <strong>Detection Logs</strong>
+                            <span className={css(styles.panelSub)}>Device {d.id}</span>
+                          </div>
+
+                          {loadingLogs[d.id] ? (
+                            <div className={css(styles.loading)}>Loading logs…</div>
+                          ) : errorLogs[d.id] ? (
+                            <div className={css(styles.error)}>Error: {errorLogs[d.id]}</div>
+                          ) : deviceLogs.length > 0 ? (
+                            <div className={css(styles.logsList)}>
+                              {deviceLogs.map((l, i) => renderLogItem(l, i, d))}
+                            </div>
+                          ) : (
+                            <div className={css(styles.noLogs)}>No logs available</div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+
             {devices.length === 0 && (
               <tr>
-                <td colSpan="5" className={css(styles.noData)}>
-                  No devices connected yet
-                </td>
+                <td colSpan="6" className={css(styles.noData)}>No devices connected yet</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {/* ─ Real-Time Alerts ─ */}
       <div className={css(styles.realTimeAlerts)}>
         <h2>Real-Time Alerts</h2>
         {realTimeAlerts.length > 0 ? (
           <ul className={css(styles.alertsList)}>
-            {realTimeAlerts.map((msg, idx) => (
-              <li key={idx}>{msg}</li>
-            ))}
+            {realTimeAlerts.map((msg, idx) => <li key={idx}>{msg}</li>)}
           </ul>
         ) : (
           <p>No current alerts</p>
@@ -140,6 +361,7 @@ export default function Status() {
   );
 }
 
+/* Widget + styles kept same as before, plus inline-confirm styles and delete button tweak */
 const Widget = ({ icon, title, value }) => (
   <div className={css(styles.widget)}>
     <div className={css(styles.widgetIcon)}>{icon}</div>
@@ -211,6 +433,72 @@ const styles = StyleSheet.create({
     padding: '12px',
     textAlign: 'left',
   },
+  deviceRow: {
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: '#111827',
+    },
+  },
+  disabledRow: {
+    opacity: 0.5,
+  },
+  deviceIdCell: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  expandIcon: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: '8px',
+    color: '#94A3B8',
+  },
+  disabledBadge: {
+    marginLeft: '8px',
+    backgroundColor: '#374151',
+    color: '#E5E7EB',
+    padding: '2px 6px',
+    borderRadius: '6px',
+    fontSize: '0.75rem',
+  },
+  deleteBtn: {
+    position: 'relative',
+    zIndex: 10,
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    padding: '6px',
+    color: '#F87171',
+    ':disabled': {
+      opacity: 0.4,
+      cursor: 'not-allowed',
+    },
+  },
+
+  /* inline confirm */
+  inlineConfirm: {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center',
+  },
+  confirmBtn: {
+    background: '#dc2626',
+    color: '#fff',
+    border: 'none',
+    padding: '6px 8px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+  },
+  cancelBtn: {
+    background: '#374151',
+    color: '#fff',
+    border: 'none',
+    padding: '6px 8px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+  },
+
   alert: {
     color: '#EF4444',
     fontWeight: 'bold',
@@ -237,5 +525,66 @@ const styles = StyleSheet.create({
     fontSize: '0.95rem',
     lineHeight: '1.6',
     color: '#E2E8F0',
+  },
+
+  /* expanded panel */
+  expandedRow: {
+    backgroundColor: 'transparent',
+  },
+  expandedPanel: {
+    padding: '12px',
+    backgroundColor: '#0B1220',
+    borderRadius: '8px',
+    marginTop: '8px',
+  },
+  panelHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginBottom: '8px',
+    color: '#E6EEF8',
+  },
+  panelSub: {
+    color: '#94A3B8',
+    fontSize: '0.85rem',
+    marginLeft: '8px',
+  },
+  logsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    maxHeight: '240px',
+    overflowY: 'auto',
+    paddingRight: '8px',
+  },
+  logItem: {
+    display: 'grid',
+    gridTemplateColumns: '180px 1fr',
+    gap: '12px',
+    alignItems: 'start',
+    padding: '10px',
+    borderRadius: '6px',
+    backgroundColor: '#0F172A',
+    border: '1px solid rgba(255,255,255,0.03)',
+  },
+  logTimestamp: {
+    color: '#94A3B8',
+    fontSize: '0.85rem',
+  },
+  logClasses: {
+    color: '#E2E8F0',
+    fontSize: '0.95rem',
+  },
+  loading: {
+    color: '#94A3B8',
+    padding: '12px',
+  },
+  error: {
+    color: '#F97316',
+    padding: '12px',
+  },
+  noLogs: {
+    color: '#94A3B8',
+    padding: '12px',
   },
 });
