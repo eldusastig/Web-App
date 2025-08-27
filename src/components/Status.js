@@ -169,11 +169,12 @@ export default function Status() {
   const renderLogItem = (log, idx, device) => {
     if (!log) return null;
     const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
-    const classes = log.classes
-      ? Array.isArray(log.classes)
-        ? log.classes.join(', ')
-        : String(log.classes)
-      : (typeof log.raw === 'string' ? log.raw : JSON.stringify(log.raw));
+    const classes = log.classes &&(
+      Array.isArray(log.classes && logs.classes.length > 0 ) ||
+      (typeof log.classes== 'string' && logs.classes.trim() !== '')
+    )
+     ?'Rubbish Detected'
+     : 'None' ;
     return (
       <div key={idx} className={css(styles.logItem)}>
         <div className={css(styles.logTimestamp)}>{tsStr || '—'}</div>
