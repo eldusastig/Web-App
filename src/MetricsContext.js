@@ -27,6 +27,11 @@ export const MetricsProvider = ({ children }) => {
   // MQTT will check this to avoid re-creating removed DB entries.
   const dbIdsRef = useRef(new Set());
 
+  // Keep a quick ref to the current devices array (helps if MQTT messages arrive
+  // before some async state updates settle)
+  const devicesRef = useRef([]);
+  useEffect(() => { devicesRef.current = devices; }, [devices]);
+
   // Tunables
   const ACTIVE_CUTOFF_MS = 8000;  // device considered offline if not seen in 8s
   const PRUNE_INTERVAL_MS = 2000; // prune every 2s
@@ -80,9 +85,9 @@ export const MetricsProvider = ({ children }) => {
     if (!authReady) return;
 
     console.log('🏁 mounting devices listener (firebase authoritative)');
-    const devicesRef = ref(realtimeDB, 'devices');
+    const devicesRefDb = ref(realtimeDB, 'devices');
 
-    const unsubDevices = onValue(devicesRef, (snap) => {
+    const unsubDevices = onValue(devicesRefDb, (snap) => {
       const data = snap.val() || {};
       // Convert object map -> array of device objects
       const arr = Object.entries(data).map(([id, vals]) => ({ id, ...vals }));
@@ -135,11 +140,16 @@ export const MetricsProvider = ({ children }) => {
     return () => unsubDevices();
   }, [authReady]);
 
+  // update devicesRef when setDevices changes (already handled by second useEffect above but keep safe)
+  useEffect(() => { devicesRef.current = devices; }, [devices]);
+
   // --- helper: push bounded log into device entry (only if device exists in DB) ---
   const pushDeviceLog = (deviceId, logObj) => {
     if (!dbIdsRef.current.has(String(deviceId))) {
       // device was deleted from DB -> do not keep re-adding logs in UI
-      return;
+      // However, if the device is present in the current in-memory devices (rare race), allow.
+      const known = devicesRef.current.some((d) => String(d.id) === String(deviceId));
+      if (!known) return;
     }
 
     setDevices((prev) => {
@@ -156,7 +166,7 @@ export const MetricsProvider = ({ children }) => {
         return updated;
       }
       // shouldn't happen because we only push logs for DB-known devices,
-      // but be defensive: insert at front
+      // but be defensive: insert at front (non-persistent until DB confirms)
       return [{ id: String(deviceId), logs: [logObj], lastSeen: Date.now(), online: true }, ...prev];
     });
   };
@@ -201,6 +211,12 @@ export const MetricsProvider = ({ children }) => {
       });
     });
 
+    // helpful lifecycle logs to debug missing/abrupt disconnects
+    client.on('reconnect', () => console.warn('MQTT reconnecting...'));
+    client.on('close', () => console.warn('MQTT connection closed'));
+    client.on('offline', () => console.warn('MQTT offline'));
+    client.on('error', (err) => console.error('MQTT error', err));
+
     client.on('message', (topic, message) => {
       const txt = (message || '').toString();
       let payload = null;
@@ -212,10 +228,14 @@ export const MetricsProvider = ({ children }) => {
 
       const parts = topic.split('/');
 
-      // --- Detections: keep logs only for DB-known devices ---
+      // --- Detections: keep logs only for DB-known devices (or known in-memory devices) ---
       if (parts.length >= 4 && parts[0] === 'esp32' && parts[2] === 'sensor' && parts[3] === 'detections') {
         const id = (payload && (payload.id ?? parts[1])) || parts[1];
-        if (!dbIdsRef.current.has(String(id))) {
+
+        // If device not in DB snapshot, but present in in-memory devices (race), allow.
+        const knownInDb = dbIdsRef.current.has(String(id));
+        const knownInMemory = devicesRef.current.some((d) => String(d.id) === String(id));
+        if (!knownInDb && !knownInMemory) {
           // dropped: device removed from DB, don't re-add logs
           console.debug('Detections for unknown/deleted device ignored:', id);
           // still update presenceRef so activeDevices metric can reflect MQTT presence if you want
@@ -331,8 +351,6 @@ export const MetricsProvider = ({ children }) => {
         console.warn('Firebase update exception', e);
       }
     });
-
-    client.on('error', (err) => console.error('MQTT error', err));
 
     return () => {
       try { client.end(true); } catch (e) { /* ignore */ }
