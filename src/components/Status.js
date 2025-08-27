@@ -676,4 +676,22 @@ const styles = StyleSheet.create({
   },
   logTimestamp: {
     color: '#94A3B8',
-    fontSize: '
+    fontSize: '0.85rem',
+  },
+  logClasses: {
+    color: '#E2E8F0',
+    fontSize: '0.95rem',
+  },
+  loading: {
+    color: '#94A3B8',
+    padding: '12px',
+  },
+  error: {
+    color: '#F97316',
+    padding: '12px',
+  },
+  noLogs: {
+    color: '#94A3B8',
+    padding: '12px',
+  },
+});
