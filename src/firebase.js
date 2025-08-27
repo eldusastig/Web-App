@@ -1,8 +1,8 @@
 // src/firebase.js
-import { initializeApp } from 'firebase/app';   // ✅ import initializeApp
-import { getDatabase } from 'firebase/database'; // ✅ import getDatabase
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getDatabase } from 'firebase/database';
 
-// Replace with your Firebase config
 const firebaseConfig = {
   apiKey: "AIzaSyDNRAlGi6IuUw2S9NL-0d7vmZbDfuGAeWI",
   authDomain: "mqtt-database-4c5ce.firebaseapp.com",
@@ -13,8 +13,17 @@ const firebaseConfig = {
   appId: "1:479417931412:web:fca043ea719a506e834681",
 };
 
-// Initialize Firebase
+// ✅ Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Export the Realtime Database instance
-export const realtimeDB = getDatabase(app);
+// ✅ Initialize Auth and Database
+const auth = getAuth(app);
+const realtimeDB = getDatabase(app);
+
+// ✅ Sign in anonymously
+signInAnonymously(auth).catch((error) => {
+  console.error('Firebase Auth Error:', error.message);
+});
+
+// ✅ Export for use in other files
+export { auth, realtimeDB };
