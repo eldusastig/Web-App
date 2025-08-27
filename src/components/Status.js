@@ -59,30 +59,54 @@ export default function Status() {
     if (boolish(d.flooded)) realTimeAlerts.push(`🌊 Flood Risk Detected at Device ${d.id}`);
   });
 
+  // Normalize incoming log entries and ensure 'classes' is null when there's no meaningful detection
   const normalizeLog = (entry) => {
     if (!entry) return null;
+
+    let result = { ts: null, classes: null, arrival: null, raw: entry };
+
     if (typeof entry === 'string') {
       try {
         const parsed = JSON.parse(entry);
-        if (parsed) {
-          return {
-            ts: parsed.ts ?? parsed.time ?? parsed.timestamp ?? null,
-            classes: parsed.classes ?? parsed.detected ?? parsed.items ?? null,
-            arrival: parsed.arrival ?? null,
-            raw: parsed,
-          };
+        if (parsed && typeof parsed === 'object') {
+          result.ts = parsed.ts ?? parsed.time ?? parsed.timestamp ?? null;
+          result.classes = parsed.classes ?? parsed.detected ?? parsed.items ?? null;
+          result.arrival = parsed.arrival ?? null;
+          result.raw = parsed;
+        } else {
+          // not a JSON object - leave raw string
+          result.raw = entry;
         }
       } catch (e) {
         return { ts: null, classes: null, arrival: null, raw: entry };
       }
-    }
-    if (typeof entry === 'object') {
+    } else if (typeof entry === 'object') {
       const ts = entry.ts ?? entry.time ?? entry.timestamp ?? null;
       const classes = entry.classes ?? entry.detected ?? entry.items ?? null;
       const arrival = entry.arrival ?? null;
-      return { ts, classes, arrival, raw: entry };
+      result = { ts, classes, arrival, raw: entry };
+    } else {
+      return { ts: null, classes: null, arrival: null, raw: String(entry) };
     }
-    return { ts: null, classes: null, arrival: null, raw: String(entry) };
+
+    // Normalize classes -> treat empty arrays, empty objects or "none" strings as no detections:
+    const { classes } = result;
+    if (classes == null) {
+      result.classes = null;
+    } else if (Array.isArray(classes)) {
+      result.classes = classes.length > 0 ? classes : null;
+    } else if (typeof classes === 'string') {
+      const s = classes.trim().toLowerCase();
+      result.classes = (s === '' || s === 'none') ? null : classes;
+    } else if (typeof classes === 'object') {
+      // object: consider no-detection if it has no own keys
+      result.classes = Object.keys(classes).length > 0 ? classes : null;
+    } else {
+      // other types -> coerce to string and check
+      const s = String(classes).trim().toLowerCase();
+      result.classes = (s === '' || s === 'none') ? null : classes;
+    }
+    return result;
   };
 
   const loadLogsForDevice = async (device) => {
@@ -166,19 +190,18 @@ export default function Status() {
     loadLogsForDevice(d);
   };
 
+  // Renders each log row: simplified "Rubbish Detected" or "None"
   const renderLogItem = (log, idx, device) => {
     if (!log) return null;
     const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
-    const classes = log.classes &&(
-      (Array.isArray(log.classes) && log.classes.length > 0 ) ||
-      (typeof log.classes== 'string' && log.classes.trim().toLowerCase() !== 'none' && log.classes.trim()!== '')
-    )
-     ?'Rubbish Detected'
-     : 'None' ;
+
+    const hasDetections = !!(log.classes); // normalizeLog ensures classes is null when no detections
+    const classesText = hasDetections ? 'Rubbish Detected' : 'None';
+
     return (
       <div key={idx} className={css(styles.logItem)}>
         <div className={css(styles.logTimestamp)}>{tsStr || '—'}</div>
-        <div className={css(styles.logClasses)}>{classes}</div>
+        <div className={css(styles.logClasses)}>{classesText}</div>
       </div>
     );
   };
