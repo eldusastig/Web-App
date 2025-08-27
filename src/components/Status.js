@@ -59,58 +59,142 @@ export default function Status() {
     if (boolish(d.flooded)) realTimeAlerts.push(`🌊 Flood Risk Detected at Device ${d.id}`);
   });
 
-  // ---- normalize log entries into a stable shape
+  // ---------------------------
+  // Normalization helpers (NEW/UPDATED)
+  // ---------------------------
+
+  // Normalize "classes" field into:
+  //  - null => no detections
+  //  - string => single class
+  //  - array => list of classes
+  //  - object => counts or keyed map (only meaningful entries kept)
+  function normalizeClasses(raw) {
+    if (raw === undefined || raw === null) return null;
+
+    const isNoneToken = (s) => {
+      if (s === null || s === undefined) return true;
+      const t = String(s).trim();
+      return t === '' || /^none$/i.test(t) || /^null$/i.test(t);
+    };
+
+    // Strings
+    if (typeof raw === 'string') {
+      const s = raw.trim();
+      if (s === '') return null;
+      // If comma-separated list, split
+      const parts = s.split(',').map((x) => x.trim()).filter((x) => x.length > 0 && !isNoneToken(x));
+      if (parts.length === 0) return null;
+      return parts.length === 1 ? parts[0] : parts;
+    }
+
+    // Arrays
+    if (Array.isArray(raw)) {
+      const parts = raw
+        .map((x) => (x === undefined || x === null ? '' : String(x).trim()))
+        .filter((x) => x.length > 0 && !isNoneToken(x));
+      if (parts.length === 0) return null;
+      return parts.length === 1 ? parts[0] : parts;
+    }
+
+    // Objects - try to keep only keys with meaningful values (e.g. counts > 0)
+    if (typeof raw === 'object') {
+      const entries = Object.entries(raw).map(([k, v]) => [String(k).trim(), v]);
+      const kept = {};
+      for (const [k, v] of entries) {
+        if (isNoneToken(k)) continue;
+        if (typeof v === 'number') {
+          if (v > 0) kept[k] = v;
+        } else if (typeof v === 'string') {
+          const n = Number(v);
+          if (!Number.isNaN(n) && n > 0) kept[k] = n;
+          else if (!/^\d+$/.test(v) && !isNoneToken(v)) {
+            // non-numeric string (probably label), keep it
+            kept[k] = v;
+          }
+        } else if (v) {
+          // truthy non-number => keep
+          kept[k] = v;
+        }
+      }
+      if (Object.keys(kept).length === 0) return null;
+      return kept;
+    }
+
+    // Fallback coerce to string
+    const coerced = String(raw).trim();
+    return coerced.length === 0 || /^none$/i.test(coerced) || /^null$/i.test(coerced) ? null : coerced;
+  }
+
+  // Normalize a full log entry into { ts, classes, arrival, raw }
   const normalizeLog = (entry) => {
     if (!entry) return null;
 
-    // if entry is a JSON string, try to parse
+    // If entry is a JSON string, parse and re-normalize
     if (typeof entry === 'string') {
       try {
         const parsed = JSON.parse(entry);
         if (parsed && typeof parsed === 'object') {
-          return normalizeLog(parsed); // re-run to unify shape
+          return normalizeLog(parsed);
         }
       } catch (e) {
-        // not JSON; fall through to return raw string
+        // not JSON -> treat as primitive below
       }
     }
 
     if (typeof entry === 'object') {
-      // prefer ts fields in common locations
       const ts = entry.ts ?? entry.time ?? entry.timestamp ?? null;
-      // classes may be stored in a few keys
-      let classes = entry.classes ?? entry.detected ?? entry.items ?? null;
-      // normalize some common string forms into arrays or null:
-      if (typeof classes === 'string') {
-        const s = classes.trim();
-        // treat "none", "", "null" (case-ins) as no detections
-        if (s === '' || /^none$/i.test(s) || /^null$/i.test(s)) {
-          classes = null;
-        } else {
-          // if comma-separated string - split into array of trimmed tokens
-          if (s.indexOf(',') !== -1) {
-            classes = s.split(',').map((x) => x.trim()).filter(Boolean);
-            if (classes.length === 0) classes = null;
-          } else {
-            // keep single class string as-is
-            classes = s;
-          }
-        }
-      } else if (Array.isArray(classes)) {
-        // empty array => null
-        if (classes.length === 0) classes = null;
-        else classes = classes.map((c) => (typeof c === 'string' ? c.trim() : String(c))).filter(Boolean);
-        if (classes.length === 0) classes = null;
-      }
-
+      const rawClasses = entry.classes ?? entry.detected ?? entry.items ?? entry.labels ?? null;
+      const classes = normalizeClasses(rawClasses);
       const arrival = entry.arrival ?? null;
       return { ts, classes, arrival, raw: entry };
     }
 
-    // other primitive types
-    return { ts: null, classes: null, arrival: null, raw: String(entry) };
+    // primitives
+    return { ts: null, classes: normalizeClasses(String(entry)), arrival: null, raw: entry };
   };
 
+  // returns true if normalized log indicates at least one detection
+  const hasDetections = (log) => {
+    if (!log) return false;
+    const cls = log.classes;
+    if (!cls) return false;
+    if (Array.isArray(cls)) return cls.length > 0;
+    if (typeof cls === 'string') {
+      const s = cls.trim().toLowerCase();
+      if (s === '' || s === 'none' || s === 'null') return false;
+      return true;
+    }
+    if (typeof cls === 'object') {
+      return Object.keys(cls).length > 0;
+    }
+    try {
+      return String(cls).trim() !== '';
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Format normalized classes into readable string (or null if none)
+  const formatClasses = (log) => {
+    if (!log) return null;
+    const cls = log.classes;
+    if (!cls) return null;
+    if (Array.isArray(cls)) return cls.join(', ');
+    if (typeof cls === 'string') return cls;
+    if (typeof cls === 'object') {
+      const parts = [];
+      for (const [k, v] of Object.entries(cls)) {
+        if (typeof v === 'number') parts.push(`${k}(${v})`);
+        else parts.push(k);
+      }
+      return parts.join(', ');
+    }
+    return String(cls);
+  };
+
+  // ---------------------------
+  // Logs loading
+  // ---------------------------
   const loadLogsForDevice = async (device) => {
     const id = device.id;
     if (logsMap[id] || loadingLogs[id]) return;
@@ -192,58 +276,11 @@ export default function Status() {
     loadLogsForDevice(d);
   };
 
-  // helper: returns true if the normalized log indicates at least one detection
-  const hasDetections = (log) => {
-    if (!log) return false;
-    const cls = log.classes;
-    if (!cls) return false;
-    if (Array.isArray(cls)) return cls.length > 0;
-    if (typeof cls === 'string') {
-      const s = cls.trim().toLowerCase();
-      // treat 'none'/'null' as no detection
-      if (s === '' || s === 'none' || s === 'null') return false;
-      return true;
-    }
-    // other types: coerce to string and treat non-empty as detection
-    try {
-      return String(cls).trim() !== '';
-    } catch (e) {
-      return false;
-    }
-  };
-
-  // helper: convert log.classes into readable "Organic, Other waste" text
-  const formatClasses = (log) => {
-    if (!log) return null;
-    const cls = log.classes;
-    if (!cls) return null;
-    if (Array.isArray(cls)) return cls.join(', ');
-    if (typeof cls === 'string') return cls;
-    if (typeof cls === 'object') {
-      try {
-        const keys = Object.keys(cls);
-        if (keys.length === 0) return null;
-        // if values are numeric counts, show "key(count)"
-        const parts = keys.map((k) => {
-          const v = cls[k];
-          if (typeof v === 'number') return `${k}(${v})`;
-          return `${k}`;
-        });
-        return parts.join(', ');
-      } catch (e) {
-        return String(cls);
-      }
-    }
-    return String(cls);
-  };
-
   const renderLogItem = (log, idx, device) => {
     if (!log) return null;
     const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
     const kinds = formatClasses(log);
-    const classesLabel = hasDetections(log)
-      ? `Rubbish Detected - ${kinds || 'Unknown'}`
-      : 'None';
+    const classesLabel = hasDetections(log) ? `Rubbish Detected - ${kinds ?? 'Unknown'}` : 'None';
     return (
       <div key={idx} className={css(styles.logItem)}>
         <div className={css(styles.logTimestamp)}>{tsStr || '—'}</div>
@@ -639,22 +676,4 @@ const styles = StyleSheet.create({
   },
   logTimestamp: {
     color: '#94A3B8',
-    fontSize: '0.85rem',
-  },
-  logClasses: {
-    color: '#E2E8F0',
-    fontSize: '0.95rem',
-  },
-  loading: {
-    color: '#94A3B8',
-    padding: '12px',
-  },
-  error: {
-    color: '#F97316',
-    padding: '12px',
-  },
-  noLogs: {
-    color: '#94A3B8',
-    padding: '12px',
-  },
-});
+    fontSize: '
