@@ -1,10 +1,12 @@
 // src/components/Status.jsx
-import React, { useContext, useState } from "react";
+import React, { useContext, useState, useEffect, useRef } from "react";
+import { MetricsContext } from "../MetricsContext";
+import { realtimeDB } from "../firebase";
+import { ref as dbRef, remove, update, onValue } from "firebase/database";
 import { FiTrash2, FiPlusCircle, FiWifi } from "react-icons/fi";
 import { StyleSheet, css } from "aphrodite";
-import { MetricsContext } from "../MetricsContext";
 
-// ✅ Inline Widget component
+// ✅ Inline Widget component with Aphrodite styles
 const Widget = ({ icon, title, value }) => (
   <div className={css(styles.widget)}>
     <div className={css(styles.widgetIcon)}>{icon}</div>
@@ -16,17 +18,54 @@ const Widget = ({ icon, title, value }) => (
 );
 
 export default function Status() {
-  const { activeDevices, floodRisks, fullBinAlerts } = useContext(MetricsContext);
+  const { activeDevices, floodRisks, fullBinAlerts } =
+    useContext(MetricsContext);
   const [devices, setDevices] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const logEndRef = useRef(null);
 
+  // Auto-scroll logs
+  useEffect(() => {
+    if (logEndRef.current) {
+      logEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [logs]);
+
+  // Load devices from Firebase
+  useEffect(() => {
+    const devicesRef = dbRef(realtimeDB, "devices");
+    const unsubscribe = onValue(devicesRef, (snapshot) => {
+      const data = snapshot.val() || {};
+      const deviceList = Object.entries(data).map(([id, value]) => ({
+        id,
+        ...value,
+      }));
+      setDevices(deviceList);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Device deletion
   const deleteDevice = (deviceId) => {
     console.log("[Status] deleteDevice called for", deviceId);
-    const confirmDelete = window.confirm(`Are you sure you want to delete device ${deviceId}?`);
+    const confirmDelete = window.confirm(
+      `Are you sure you want to delete device ${deviceId}?`
+    );
     if (!confirmDelete) {
       console.log(`[Status] user cancelled delete for ${deviceId}`);
       return;
     }
     setDevices((prev) => prev.filter((d) => d.id !== deviceId));
+    remove(dbRef(realtimeDB, `devices/${deviceId}`));
+    setLogs((prev) => [...prev, `Device ${deviceId} deleted.`]);
+  };
+
+  // Update device status (e.g. refresh last seen)
+  const handleRefresh = (deviceId) => {
+    const now = new Date().toISOString();
+    update(dbRef(realtimeDB, `devices/${deviceId}`), { lastSeen: now });
+    setLogs((prev) => [...prev, `Device ${deviceId} refreshed.`]);
   };
 
   return (
@@ -34,23 +73,70 @@ export default function Status() {
       {/* Top row widgets */}
       <div className={css(styles.widgetRow)}>
         <Widget icon={<FiWifi />} title="Active Devices" value={activeDevices} />
-        <Widget icon={<FiPlusCircle />} title="Flood Risks" value={floodRisks} />
-        <Widget icon={<FiTrash2 />} title="Full Bin Alerts" value={fullBinAlerts} />
+        <Widget
+          icon={<FiPlusCircle />}
+          title="Flood Risks"
+          value={floodRisks}
+        />
+        <Widget
+          icon={<FiTrash2 />}
+          title="Full Bin Alerts"
+          value={fullBinAlerts}
+        />
       </div>
 
-      {/* Device list */}
-      <div className={css(styles.deviceList)}>
-        {devices.map((device) => (
-          <div key={device.id} className={css(styles.deviceCard)}>
-            <span>{device.name}</span>
-            <button
-              className={css(styles.deleteBtn)}
-              onClick={() => deleteDevice(device.id)}
-            >
-              <FiTrash2 />
-            </button>
-          </div>
-        ))}
+      {/* Device health table */}
+      <table className={css(styles.table)}>
+        <thead>
+          <tr>
+            <th>Device ID</th>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Bin Level</th>
+            <th>Flood Risk</th>
+            <th>Last Seen</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {devices.map((device) => (
+            <tr key={device.id}>
+              <td>{device.id}</td>
+              <td>{device.name || "Unnamed"}</td>
+              <td>{device.status || "Unknown"}</td>
+              <td>{device.binLevel ?? "N/A"}</td>
+              <td>{device.floodRisk ?? "N/A"}</td>
+              <td>{device.lastSeen ?? "Never"}</td>
+              <td>
+                <button
+                  className={css(styles.actionBtn)}
+                  onClick={() => handleRefresh(device.id)}
+                >
+                  Refresh
+                </button>
+                <button
+                  className={css(styles.deleteBtn)}
+                  onClick={() => deleteDevice(device.id)}
+                >
+                  <FiTrash2 />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Log panel */}
+      <div className={css(styles.logPanel)}>
+        <h3>Activity Logs</h3>
+        <div className={css(styles.logContent)}>
+          {logs.map((log, i) => (
+            <div key={i} className={css(styles.logItem)}>
+              {log}
+            </div>
+          ))}
+          <div ref={logEndRef} />
+        </div>
       </div>
     </div>
   );
@@ -65,18 +151,39 @@ const styles = StyleSheet.create({
     gap: 16,
     marginBottom: 20,
   },
-  deviceList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
+  table: {
+    width: "100%",
+    borderCollapse: "collapse",
+    marginBottom: 20,
+    background: "#fff",
   },
-  deviceCard: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    background: "#f9f9f9",
+  logPanel: {
+    marginTop: 20,
     padding: 12,
+    background: "#f4f4f4",
     borderRadius: 8,
+  },
+  logContent: {
+    maxHeight: 200,
+    overflowY: "auto",
+    fontSize: 14,
+    padding: 8,
+    background: "#fff",
+    borderRadius: 4,
+  },
+  logItem: {
+    marginBottom: 6,
+    borderBottom: "1px solid #eee",
+    paddingBottom: 4,
+  },
+  actionBtn: {
+    marginRight: 8,
+    background: "#007bff",
+    color: "#fff",
+    border: "none",
+    padding: "6px 10px",
+    borderRadius: 4,
+    cursor: "pointer",
   },
   deleteBtn: {
     background: "transparent",
