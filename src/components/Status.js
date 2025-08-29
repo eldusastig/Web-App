@@ -53,153 +53,46 @@ export default function Status() {
     });
   }, [devices]);
 
+  // Build real-time alerts using binFillPct and flood flag
   const realTimeAlerts = [];
   devices.forEach((d) => {
-    if (boolish(d.binFull)) realTimeAlerts.push(`⚠️ Bin Full at Device ${d.id}`);
+    // normalize percentage: prefer numeric binFillPct, fallback to boolean => 100
+    const binPct = (typeof d.binFillPct === 'number') ? d.binFillPct : (boolish(d.binFull) ? 100 : null);
+    if (binPct != null && binPct >= 90) realTimeAlerts.push(`⚠️ Bin ${binPct}% at Device ${d.id}`);
     if (boolish(d.flooded)) realTimeAlerts.push(`🌊 Flood Risk Detected at Device ${d.id}`);
   });
 
-  // ---------------------------
-  // Normalization helpers (NEW/UPDATED)
-  // ---------------------------
-
-  // Normalize "classes" field into:
-  //  - null => no detections
-  //  - string => single class
-  //  - array => list of classes
-  //  - object => counts or keyed map (only meaningful entries kept)
-  function normalizeClasses(raw) {
-    if (raw === undefined || raw === null) return null;
-
-    const isNoneToken = (s) => {
-      if (s === null || s === undefined) return true;
-      const t = String(s).trim();
-      return t === '' || /^none$/i.test(t) || /^null$/i.test(t);
-    };
-
-    // Strings
-    if (typeof raw === 'string') {
-      const s = raw.trim();
-      if (s === '') return null;
-      // If comma-separated list, split
-      const parts = s.split(',').map((x) => x.trim()).filter((x) => x.length > 0 && !isNoneToken(x));
-      if (parts.length === 0) return null;
-      return parts.length === 1 ? parts[0] : parts;
-    }
-
-    // Arrays
-    if (Array.isArray(raw)) {
-      const parts = raw
-        .map((x) => (x === undefined || x === null ? '' : String(x).trim()))
-        .filter((x) => x.length > 0 && !isNoneToken(x));
-      if (parts.length === 0) return null;
-      return parts.length === 1 ? parts[0] : parts;
-    }
-
-    // Objects - try to keep only keys with meaningful values (e.g. counts > 0)
-    if (typeof raw === 'object') {
-      const entries = Object.entries(raw).map(([k, v]) => [String(k).trim(), v]);
-      const kept = {};
-      for (const [k, v] of entries) {
-        if (isNoneToken(k)) continue;
-        if (typeof v === 'number') {
-          if (v > 0) kept[k] = v;
-        } else if (typeof v === 'string') {
-          const n = Number(v);
-          if (!Number.isNaN(n) && n > 0) kept[k] = n;
-          else if (!/^\d+$/.test(v) && !isNoneToken(v)) {
-            // non-numeric string (probably label), keep it
-            kept[k] = v;
-          }
-        } else if (v) {
-          // truthy non-number => keep
-          kept[k] = v;
-        }
-      }
-      if (Object.keys(kept).length === 0) return null;
-      return kept;
-    }
-
-    // Fallback coerce to string
-    const coerced = String(raw).trim();
-    return coerced.length === 0 || /^none$/i.test(coerced) || /^null$/i.test(coerced) ? null : coerced;
-  }
-
-  // Normalize a full log entry into { ts, classes, arrival, raw }
   const normalizeLog = (entry) => {
     if (!entry) return null;
-
-    // If entry is a JSON string, parse and re-normalize
     if (typeof entry === 'string') {
       try {
         const parsed = JSON.parse(entry);
-        if (parsed && typeof parsed === 'object') {
-          return normalizeLog(parsed);
+        if (parsed) {
+          return {
+            ts: parsed.ts ?? parsed.time ?? parsed.timestamp ?? null,
+            classes: parsed.classes ?? parsed.detected ?? parsed.items ?? null,
+            arrival: parsed.arrival ?? null,
+            raw: parsed,
+          };
         }
       } catch (e) {
-        // not JSON -> treat as primitive below
+        return { ts: null, classes: null, arrival: null, raw: entry };
       }
     }
-
     if (typeof entry === 'object') {
       const ts = entry.ts ?? entry.time ?? entry.timestamp ?? null;
-      const rawClasses = entry.classes ?? entry.detected ?? entry.items ?? entry.labels ?? null;
-      const classes = normalizeClasses(rawClasses);
+      const classes = entry.classes ?? entry.detected ?? entry.items ?? null;
       const arrival = entry.arrival ?? null;
       return { ts, classes, arrival, raw: entry };
     }
-
-    // primitives
-    return { ts: null, classes: normalizeClasses(String(entry)), arrival: null, raw: entry };
+    return { ts: null, classes: null, arrival: null, raw: String(entry) };
   };
 
-  // returns true if normalized log indicates at least one detection
-  const hasDetections = (log) => {
-    if (!log) return false;
-    const cls = log.classes;
-    if (!cls) return false;
-    if (Array.isArray(cls)) return cls.length > 0;
-    if (typeof cls === 'string') {
-      const s = cls.trim().toLowerCase();
-      if (s === '' || s === 'none' || s === 'null') return false;
-      return true;
-    }
-    if (typeof cls === 'object') {
-      return Object.keys(cls).length > 0;
-    }
-    try {
-      return String(cls).trim() !== '';
-    } catch (e) {
-      return false;
-    }
-  };
-
-  // Format normalized classes into readable string (or null if none)
-  const formatClasses = (log) => {
-    if (!log) return null;
-    const cls = log.classes;
-    if (!cls) return null;
-    if (Array.isArray(cls)) return cls.join(', ');
-    if (typeof cls === 'string') return cls;
-    if (typeof cls === 'object') {
-      const parts = [];
-      for (const [k, v] of Object.entries(cls)) {
-        if (typeof v === 'number') parts.push(`${k}(${v})`);
-        else parts.push(k);
-      }
-      return parts.join(', ');
-    }
-    return String(cls);
-  };
-
-  // ---------------------------
-  // Logs loading
-  // ---------------------------
   const loadLogsForDevice = async (device) => {
     const id = device.id;
     if (logsMap[id] || loadingLogs[id]) return;
     if (Array.isArray(device.logs) && device.logs.length > 0) {
-      const normalized = device.logs.map(normalizeLog).filter(Boolean);
+      const normalized = device.logs.map(normalizeLog);
       setLogsMap((m) => ({ ...m, [id]: normalized }));
       return;
     }
@@ -210,7 +103,7 @@ export default function Status() {
       const res = await fetch(`/api/devices/${encodeURIComponent(id)}/logs`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      const normalized = Array.isArray(json) ? json.map(normalizeLog).filter(Boolean) : [normalizeLog(json)].filter(Boolean);
+      const normalized = Array.isArray(json) ? json.map(normalizeLog) : [normalizeLog(json)];
       setLogsMap((m) => ({ ...m, [id]: normalized }));
     } catch (err) {
       console.error('Failed to load logs for', id, err);
@@ -279,12 +172,16 @@ export default function Status() {
   const renderLogItem = (log, idx, device) => {
     if (!log) return null;
     const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
-    const kinds = formatClasses(log);
-    const classesLabel = hasDetections(log) ? `Rubbish Detected - ${kinds ?? 'Unknown'}` : 'None';
+    // show detected vs none properly
+    const classesExist = (log.classes && (
+      (Array.isArray(log.classes) && log.classes.length > 0) ||
+      (typeof log.classes === 'string' && log.classes.trim() !== '')
+    ));
+    const classes = classesExist ? 'Rubbish Detected' : 'None';
     return (
       <div key={idx} className={css(styles.logItem)}>
         <div className={css(styles.logTimestamp)}>{tsStr || '—'}</div>
-        <div className={css(styles.logClasses)}>{classesLabel}</div>
+        <div className={css(styles.logClasses)}>{classes}</div>
       </div>
     );
   };
@@ -332,6 +229,14 @@ export default function Status() {
     }
   };
 
+  // small helper to format bin %, showing fallback for legacy boolean
+  const formatBinPctDisplay = (d) => {
+    if (!d) return '—';
+    if (typeof d.binFillPct === 'number') return `${d.binFillPct}%`;
+    if (boolish(d.binFull)) return '100%'; // legacy device reported boolean
+    return '—';
+  };
+
   return (
     <div className={css(styles.statusContainer)}>
       <div className={css(styles.widgetGrid)}>
@@ -345,353 +250,66 @@ export default function Status() {
         <table className={css(styles.deviceTable)}>
           <thead>
             <tr className={css(styles.tableHeader)}>
-              <th>Device ID</th>
-              <th>Street Address</th>
-              <th>Flooded</th>
-              <th>Bin Full</th>
-              <th>Active</th>
-              <th>Actions</th>
+              <th>ID</th>
+              <th>Address</th>
+              <th>Last Seen</th>
+              <th>Bin %</th>
+              <th>Flood</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
-            {devices.map((d) => {
-              const isDisabled = boolish(d.disabled);
-              const isExpanded = expandedDevice === d.id;
-              const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0
-                ? d.logs.map(normalizeLog).filter(Boolean)
-                : (logsMap[d.id] || []);
-
-              return (
-                <React.Fragment key={d.id}>
-                  <tr
-                    className={css(styles.deviceRow, isDisabled ? styles.disabledRow : null)}
-                    onClick={() => onToggleDevice(d)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onToggleDevice(d); }}
-                  >
-                    <td className={css(styles.deviceIdCell)}>
-                      <span className={css(styles.expandIcon)}>{isExpanded ? <FiChevronUp /> : <FiChevronDown />}</span>
-                      {d.id} {isDisabled && <span className={css(styles.disabledBadge)}>Disabled</span>}
-                    </td>
-                    <td>{d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—'}</td>
-                    <td className={css(boolish(d.flooded) ? styles.alert : styles.ok)}>{boolish(d.flooded) ? 'Yes' : 'No'}</td>
-                    <td className={css(boolish(d.binFull) ? styles.alert : styles.ok)}>{boolish(d.binFull) ? 'Yes' : 'No'}</td>
-                    <td className={css(boolish(d.active) || boolish(d.online) ? styles.ok : styles.alert)}>{boolish(d.active) || boolish(d.online) ? 'Yes' : 'No'}</td>
-
-                    {/* Actions cell: stop row-level clicks and show inline confirm when needed */}
-                    <td onClick={(e) => e.stopPropagation()}>
-                      {pendingDelete === d.id ? (
-                        <div className={css(styles.inlineConfirm)}>
-                          <span>Confirm delete?</span>
-                          <button
-                            type="button"
-                            className={css(styles.confirmBtn)}
-                            onClick={(e) => performDelete(e, d.id)}
-                            disabled={deleting}
-                          >
-                            {deleting ? 'Deleting…' : 'Yes'}
-                          </button>
-                          <button
-                            type="button"
-                            className={css(styles.cancelBtn)}
-                            onClick={(e) => cancelDelete(e)}
-                            disabled={deleting}
-                          >
-                            No
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className={css(styles.deleteBtn)}
-                          onClick={(e) => startDelete(e, d.id)}
-                          disabled={!authReady || deleting}
-                          aria-disabled={!authReady || deleting}
-                          title={!authReady ? 'Waiting for auth...' : `Delete device ${d.id}`}
-                          data-test-delete={`delete-${d.id}`}
-                        >
-                          <FiTrash2 />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-
-                  {isExpanded && (
-                    <tr className={css(styles.expandedRow)}>
-                      <td colSpan="6">
-                        <div className={css(styles.expandedPanel)}>
-                          <div className={css(styles.panelHeader)}>
-                            <strong>Detection Logs</strong>
-                            <span className={css(styles.panelSub)}>Device {d.id}</span>
-                          </div>
-
-                          {loadingLogs[d.id] ? (
-                            <div className={css(styles.loading)}>Loading logs…</div>
-                          ) : errorLogs[d.id] ? (
-                            <div className={css(styles.error)}>Error: {errorLogs[d.id]}</div>
-                          ) : deviceLogs.length > 0 ? (
-                            <div className={css(styles.logsList)}>
-                              {deviceLogs.map((l, i) => renderLogItem(l, i, d))}
-                            </div>
-                          ) : (
-                            <div className={css(styles.noLogs)}>No logs available</div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              );
-            })}
-
-            {devices.length === 0 && (
-              <tr>
-                <td colSpan="6" className={css(styles.noData)}>No devices connected yet</td>
+            {devices.map((d) => (
+              <tr key={d.id} className={css(styles.tableRow)} onClick={() => onToggleDevice(d)}>
+                <td>{d.id}</td>
+                <td>{deviceAddresses[d.id] || '—'}</td>
+                <td>{d.lastSeen ? new Date(d.lastSeen).toLocaleString() : '—'}</td>
+                <td>
+                  <span className={css(styles.binPct)}>
+                    {formatBinPctDisplay(d)}
+                  </span>
+                  { (typeof d.binFillPct === 'number' && d.binFillPct >= 90) || (d.binFillPct == null && boolish(d.binFull)) ? (
+                    <span className={css(styles.alertBadge)}>ALERT</span>
+                  ) : null }
+                </td>
+                <td>{boolish(d.flooded) ? 'Yes' : 'No'}</td>
+                <td style={{ width: 120 }}>
+                  <button onClick={(e) => startDelete(e, d.id)} disabled={deleting && pendingDelete !== d.id}>
+                    {pendingDelete === d.id ? 'Confirm?' : <FiTrash2 />}
+                  </button>
+                </td>
               </tr>
-            )}
+            ))}
           </tbody>
         </table>
-      </div>
 
-      <div className={css(styles.realTimeAlerts)}>
-        <h2>Real-Time Alerts</h2>
-        {realTimeAlerts.length > 0 ? (
-          <ul className={css(styles.alertsList)}>
-            {realTimeAlerts.map((msg, idx) => <li key={idx}>{msg}</li>)}
-          </ul>
-        ) : (
-          <p>No current alerts</p>
+        {expandedDevice && (
+          <div className={css(styles.logsPanel)}>
+            <h3>Logs for {expandedDevice}</h3>
+            {loadingLogs[expandedDevice] ? <div>Loading logs…</div> : null}
+            {errorLogs[expandedDevice] ? <div className={css(styles.error)}>{errorLogs[expandedDevice]}</div> : null}
+            <div>
+              {(logsMap[expandedDevice] || []).map((l, i) => renderLogItem(l, i, devices.find(d => d.id === expandedDevice)))}
+            </div>
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-/* Widget + styles kept same as before, plus inline-confirm styles and delete button tweak */
-const Widget = ({ icon, title, value }) => (
-  <div className={css(styles.widget)}>
-    <div className={css(styles.widgetIcon)}>{icon}</div>
-    <div className={css(styles.widgetText)}>
-      <p className={css(styles.widgetTitle)}>{title}</p>
-      <p className={css(styles.widgetValue)}>{value}</p>
-    </div>
-  </div>
-);
-
+// Minimal styles (adapt to your existing styles)
 const styles = StyleSheet.create({
-  statusContainer: {
-    flex: 1,
-    padding: '24px',
-    overflow: 'auto',
-    backgroundColor: '#0F172A',
-  },
-  widgetGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-    gap: '24px',
-    marginBottom: '32px',
-  },
-  widget: {
-    backgroundColor: '#1E293B',
-    padding: '20px',
-    borderRadius: '12px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-    boxShadow: '0 4px 10px rgba(0, 0, 0, 0.2)',
-    cursor: 'pointer',
-  },
-  widgetIcon: {
-    fontSize: '36px',
-    color: '#3B82F6',
-  },
-  widgetText: { color: '#F8FAFC' },
-  widgetTitle: {
-    fontSize: '1rem',
-    fontWeight: '600',
-    marginBottom: '4px',
-  },
-  widgetValue: {
-    fontSize: '1.25rem',
-    fontWeight: 'bold',
-  },
-  deviceHealth: {
-    backgroundColor: '#1E293B',
-    padding: '24px',
-    borderRadius: '12px',
-    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.2)',
-    marginBottom: '32px',
-  },
-  deviceTable: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    marginTop: '12px',
-    marginBottom: '12px',
-    color: '#F8FAFC',
-    fontSize: '0.9rem',
-    tableLayout: 'fixed',
-  },
-  tableHeader: {
-    color: '#94A3B8',
-    fontWeight: '600',
-    fontSize: '1rem',
-    textTransform: 'uppercase',
-    padding: '12px',
-    textAlign: 'left',
-  },
-  deviceRow: {
-    cursor: 'pointer',
-    ':hover': {
-      backgroundColor: '#111827',
-    },
-  },
-  disabledRow: {
-    opacity: 0.5,
-  },
-  deviceIdCell: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  expandIcon: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: '8px',
-    color: '#94A3B8',
-  },
-  disabledBadge: {
-    marginLeft: '8px',
-    backgroundColor: '#374151',
-    color: '#E5E7EB',
-    padding: '2px 6px',
-    borderRadius: '6px',
-    fontSize: '0.75rem',
-  },
-  deleteBtn: {
-    position: 'relative',
-    zIndex: 10,
-    background: 'transparent',
-    border: 'none',
-    cursor: 'pointer',
-    padding: '6px',
-    color: '#F87171',
-    ':disabled': {
-      opacity: 0.4,
-      cursor: 'not-allowed',
-    },
-  },
-
-  /* inline confirm */
-  inlineConfirm: {
-    display: 'flex',
-    gap: '8px',
-    alignItems: 'center',
-  },
-  confirmBtn: {
-    background: '#dc2626',
-    color: '#fff',
-    border: 'none',
-    padding: '6px 8px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-  },
-  cancelBtn: {
-    background: '#374151',
-    color: '#fff',
-    border: 'none',
-    padding: '6px 8px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-  },
-
-  alert: {
-    color: '#EF4444',
-    fontWeight: 'bold',
-  },
-  ok: {
-    color: '#10B981',
-    fontWeight: 'bold',
-  },
-  noData: {
-    color: '#94A3B8',
-    textAlign: 'center',
-    padding: '16px',
-  },
-  realTimeAlerts: {
-    backgroundColor: '#1E293B',
-    padding: '24px',
-    borderRadius: '12px',
-    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.2)',
-  },
-  alertsList: {
-    listStyleType: 'none',
-    paddingLeft: '0',
-    marginTop: '12px',
-    fontSize: '0.95rem',
-    lineHeight: '1.6',
-    color: '#E2E8F0',
-  },
-
-  /* expanded panel */
-  expandedRow: {
-    backgroundColor: 'transparent',
-  },
-  expandedPanel: {
-    padding: '12px',
-    backgroundColor: '#0B1220',
-    borderRadius: '8px',
-    marginTop: '8px',
-  },
-  panelHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: '8px',
-    color: '#E6EEF8',
-  },
-  panelSub: {
-    color: '#94A3B8',
-    fontSize: '0.85rem',
-    marginLeft: '8px',
-  },
-  logsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    maxHeight: '240px',
-    overflowY: 'auto',
-    paddingRight: '8px',
-  },
-  logItem: {
-    display: 'grid',
-    gridTemplateColumns: '180px 1fr',
-    gap: '12px',
-    alignItems: 'start',
-    padding: '10px',
-    borderRadius: '6px',
-    backgroundColor: '#0F172A',
-    border: '1px solid rgba(255,255,255,0.03)',
-  },
-  logTimestamp: {
-    color: '#94A3B8',
-    fontSize: '0.85rem',
-  },
-  logClasses: {
-    color: '#E2E8F0',
-    fontSize: '0.95rem',
-  },
-  loading: {
-    color: '#94A3B8',
-    padding: '12px',
-  },
-  error: {
-    color: '#F97316',
-    padding: '12px',
-  },
-  noLogs: {
-    color: '#94A3B8',
-    padding: '12px',
-  },
+  statusContainer: { padding: 12 },
+  widgetGrid: { display: 'flex', gap: 12, marginBottom: 12 },
+  deviceHealth: { marginTop: 12 },
+  deviceTable: { width: '100%', borderCollapse: 'collapse' },
+  tableHeader: { textAlign: 'left', background: '#f6f6f6' },
+  tableRow: { cursor: 'pointer', borderBottom: '1px solid #eee' },
+  logItem: { display: 'flex', gap: 12, padding: 6, borderBottom: '1px dashed #eee' },
+  logTimestamp: { width: 220, fontSize: 13, color: '#333' },
+  logClasses: { flex: 1, fontSize: 14 },
+  binPct: { fontWeight: '600', marginRight: 8 },
+  alertBadge: { marginLeft: 8, background: '#ff4d4f', color: 'white', padding: '2px 6px', borderRadius: 6, fontSize: 12 },
+  error: { color: 'red' },
 });
