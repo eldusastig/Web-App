@@ -1,12 +1,18 @@
 // src/components/Status.jsx
-import React, { useContext, useState, useEffect, useRef } from "react";
+import React, { useContext, useState, useEffect } from "react";
 import { MetricsContext } from "../MetricsContext";
 import { realtimeDB } from "../firebase";
-import { ref as dbRef, remove, update, onValue } from "firebase/database";
-import { FiTrash2, FiPlusCircle, FiWifi } from "react-icons/fi";
+import { ref as dbRef, onValue, remove } from "firebase/database";
+import {
+  FiTrash2,
+  FiPlusCircle,
+  FiWifi,
+  FiChevronDown,
+  FiChevronUp,
+} from "react-icons/fi";
 import { StyleSheet, css } from "aphrodite";
 
-// ✅ Inline Widget component with Aphrodite styles
+// ✅ Widget component
 const Widget = ({ icon, title, value }) => (
   <div className={css(styles.widget)}>
     <div className={css(styles.widgetIcon)}>{icon}</div>
@@ -21,32 +27,25 @@ export default function Status() {
   const { activeDevices, floodRisks, fullBinAlerts } =
     useContext(MetricsContext);
   const [devices, setDevices] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const logEndRef = useRef(null);
+  const [expanded, setExpanded] = useState({});
+  const [realTimeAlerts, setRealTimeAlerts] = useState([]);
+  const [logs, setLogs] = useState([]); // ✅ Global logs
 
-  // Auto-scroll logs
-  useEffect(() => {
-    if (logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [logs]);
-
-  // Load devices from Firebase
+  // ✅ Load devices from Firebase
   useEffect(() => {
     const devicesRef = dbRef(realtimeDB, "devices");
-    const unsubscribe = onValue(devicesRef, (snapshot) => {
+    const unsub = onValue(devicesRef, (snapshot) => {
       const data = snapshot.val() || {};
-      const deviceList = Object.entries(data).map(([id, value]) => ({
+      const arr = Object.entries(data).map(([id, d]) => ({
         id,
-        ...value,
+        ...d,
       }));
-      setDevices(deviceList);
+      setDevices(arr);
     });
-
-    return () => unsubscribe();
+    return () => unsub();
   }, []);
 
-  // Device deletion
+  // ✅ Delete device
   const deleteDevice = (deviceId) => {
     console.log("[Status] deleteDevice called for", deviceId);
     const confirmDelete = window.confirm(
@@ -58,15 +57,34 @@ export default function Status() {
     }
     setDevices((prev) => prev.filter((d) => d.id !== deviceId));
     remove(dbRef(realtimeDB, `devices/${deviceId}`));
-    setLogs((prev) => [...prev, `Device ${deviceId} deleted.`]);
+    setLogs((prev) => [
+      ...prev,
+      `${new Date().toLocaleString()}: Deleted device ${deviceId}`,
+    ]);
   };
 
-  // Update device status (e.g. refresh last seen)
-  const handleRefresh = (deviceId) => {
-    const now = new Date().toISOString();
-    update(dbRef(realtimeDB, `devices/${deviceId}`), { lastSeen: now });
-    setLogs((prev) => [...prev, `Device ${deviceId} refreshed.`]);
+  // ✅ Toggle expand/collapse
+  const toggleExpand = (id) => {
+    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
   };
+
+  // ✅ Append real-time alerts from devices
+  useEffect(() => {
+    if (!devices.length) return;
+    const latest = devices
+      .map((d) => d.logs?.slice(-1)[0])
+      .filter(Boolean)
+      .map((msg, idx) => `Device ${devices[idx].id}: ${msg}`);
+    setRealTimeAlerts(latest);
+
+    // Add to global logs
+    if (latest.length > 0) {
+      setLogs((prev) => [
+        ...prev,
+        `${new Date().toLocaleString()}: ${latest.join(" | ")}`,
+      ]);
+    }
+  }, [devices]);
 
   return (
     <div className={css(styles.container)}>
@@ -85,58 +103,75 @@ export default function Status() {
         />
       </div>
 
-      {/* Device health table */}
-      <table className={css(styles.table)}>
-        <thead>
-          <tr>
-            <th>Device ID</th>
-            <th>Name</th>
-            <th>Status</th>
-            <th>Bin Level</th>
-            <th>Flood Risk</th>
-            <th>Last Seen</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {devices.map((device) => (
-            <tr key={device.id}>
-              <td>{device.id}</td>
-              <td>{device.name || "Unnamed"}</td>
-              <td>{device.status || "Unknown"}</td>
-              <td>{device.binLevel ?? "N/A"}</td>
-              <td>{device.floodRisk ?? "N/A"}</td>
-              <td>{device.lastSeen ?? "Never"}</td>
-              <td>
-                <button
-                  className={css(styles.actionBtn)}
-                  onClick={() => handleRefresh(device.id)}
-                >
-                  Refresh
-                </button>
-                <button
-                  className={css(styles.deleteBtn)}
-                  onClick={() => deleteDevice(device.id)}
-                >
-                  <FiTrash2 />
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      {/* Log panel */}
-      <div className={css(styles.logPanel)}>
-        <h3>Activity Logs</h3>
-        <div className={css(styles.logContent)}>
-          {logs.map((log, i) => (
-            <div key={i} className={css(styles.logItem)}>
-              {log}
+      {/* Devices list */}
+      <div className={css(styles.deviceList)}>
+        {devices.map((device) => (
+          <div key={device.id} className={css(styles.deviceCard)}>
+            <div
+              className={css(styles.deviceHeader)}
+              onClick={() => toggleExpand(device.id)}
+            >
+              <span>{device.name || device.id}</span>
+              {expanded[device.id] ? <FiChevronUp /> : <FiChevronDown />}
             </div>
-          ))}
-          <div ref={logEndRef} />
-        </div>
+            {expanded[device.id] && (
+              <div className={css(styles.deviceDetails)}>
+                {/* Logs */}
+                <div className={css(styles.logs)}>
+                  <h4>Detection Logs</h4>
+                  {device.logs && device.logs.length > 0 ? (
+                    <ul>
+                      {device.logs.map((log, idx) => (
+                        <li key={idx}>{log}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>No logs available.</p>
+                  )}
+                </div>
+
+                {/* Delete button */}
+                <button
+                  className={css(styles.deleteButton)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteDevice(device.id);
+                  }}
+                >
+                  <FiTrash2 /> Delete
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Real-time Alerts */}
+      <div className={css(styles.alerts)}>
+        <h3>Real-Time Alerts</h3>
+        {realTimeAlerts.length > 0 ? (
+          <ul>
+            {realTimeAlerts.map((alert, idx) => (
+              <li key={idx}>{alert}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>No active alerts.</p>
+        )}
+      </div>
+
+      {/* ✅ Global Activity Logs */}
+      <div className={css(styles.activityLogs)}>
+        <h3>Activity Logs</h3>
+        {logs.length > 0 ? (
+          <ul>
+            {logs.map((log, idx) => (
+              <li key={idx}>{log}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>No activity yet.</p>
+        )}
       </div>
     </div>
   );
@@ -144,84 +179,82 @@ export default function Status() {
 
 const styles = StyleSheet.create({
   container: {
-    padding: 20,
+    background: "#1a1a1a",
+    color: "#fff",
+    padding: "20px",
+    minHeight: "100vh",
+    fontFamily: "Arial, sans-serif",
   },
   widgetRow: {
-    display: "flex",
-    gap: 16,
-    marginBottom: 20,
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: "15px",
+    marginBottom: "20px",
   },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-    marginBottom: 20,
-    background: "#fff",
-  },
-  logPanel: {
-    marginTop: 20,
-    padding: 12,
-    background: "#f4f4f4",
-    borderRadius: 8,
-  },
-  logContent: {
-    maxHeight: 200,
-    overflowY: "auto",
-    fontSize: 14,
-    padding: 8,
-    background: "#fff",
-    borderRadius: 4,
-  },
-  logItem: {
-    marginBottom: 6,
-    borderBottom: "1px solid #eee",
-    paddingBottom: 4,
-  },
-  actionBtn: {
-    marginRight: 8,
-    background: "#007bff",
-    color: "#fff",
-    border: "none",
-    padding: "6px 10px",
-    borderRadius: 4,
-    cursor: "pointer",
-  },
-  deleteBtn: {
-    background: "transparent",
-    border: "none",
-    cursor: "pointer",
-    fontSize: 18,
-    color: "#d33",
-  },
-
-  // ✅ Widget styles
   widget: {
+    background: "#2a2a2a",
+    borderRadius: "12px",
+    padding: "15px",
     display: "flex",
     alignItems: "center",
-    padding: 12,
-    borderRadius: 8,
-    background: "#fff",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-    minWidth: 180,
+    boxShadow: "0 2px 5px rgba(0,0,0,0.3)",
   },
   widgetIcon: {
-    marginRight: 10,
-    fontSize: 20,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    fontSize: "24px",
+    marginRight: "12px",
   },
   widgetBody: {
     display: "flex",
     flexDirection: "column",
   },
   widgetTitle: {
-    fontSize: 12,
-    color: "#666",
-    marginBottom: 4,
+    fontSize: "14px",
+    color: "#aaa",
   },
   widgetValue: {
-    fontSize: 18,
-    fontWeight: 700,
-    color: "#111",
+    fontSize: "20px",
+    fontWeight: "bold",
+  },
+  deviceList: {
+    marginTop: "20px",
+  },
+  deviceCard: {
+    background: "#2a2a2a",
+    borderRadius: "12px",
+    marginBottom: "10px",
+    overflow: "hidden",
+  },
+  deviceHeader: {
+    padding: "12px",
+    display: "flex",
+    justifyContent: "space-between",
+    cursor: "pointer",
+    background: "#333",
+  },
+  deviceDetails: {
+    padding: "12px",
+  },
+  logs: {
+    marginBottom: "10px",
+  },
+  deleteButton: {
+    background: "#d9534f",
+    border: "none",
+    color: "#fff",
+    padding: "8px 12px",
+    borderRadius: "6px",
+    cursor: "pointer",
+  },
+  alerts: {
+    marginTop: "20px",
+    background: "#2a2a2a",
+    borderRadius: "12px",
+    padding: "15px",
+  },
+  activityLogs: {
+    marginTop: "20px",
+    background: "#2a2a2a",
+    borderRadius: "12px",
+    padding: "15px",
   },
 });
