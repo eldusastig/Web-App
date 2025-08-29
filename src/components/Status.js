@@ -376,7 +376,7 @@ export default function Status() {
                     </td>
                     <td>{d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—'}</td>
                     <td className={css(boolish(d.flooded) ? styles.alert : styles.ok)}>{boolish(d.flooded) ? 'Yes' : 'No'}</td>
-                    <td className={css(boolish(d.binFull) ? styles.alert : styles.ok)}>{d.binFillPct!=null?`${d.binFillPct}%` : - }</td>
+                    <td className={css(boolish(d.binFull) ? styles.alert : styles.ok)}>  {d.binFillPct != null ? `${d.binFillPct}%` : '—'}</td>
                     <td className={css(boolish(d.active) || boolish(d.online) ? styles.ok : styles.alert)}>{boolish(d.active) || boolish(d.online) ? 'Yes' : 'No'}</td>
 
                     {/* Actions cell: stop row-level clicks and show inline confirm when needed */}
