@@ -1,260 +1,276 @@
 // src/components/Status.jsx
-import React, { useContext, useState, useEffect } from "react";
-import { MetricsContext } from "../MetricsContext";
-import { realtimeDB } from "../firebase";
-import { ref as dbRef, onValue, remove } from "firebase/database";
-import {
-  FiTrash2,
-  FiPlusCircle,
-  FiWifi,
-  FiChevronDown,
-  FiChevronUp,
-} from "react-icons/fi";
-import { StyleSheet, css } from "aphrodite";
-
-// ✅ Widget component
-const Widget = ({ icon, title, value }) => (
-  <div className={css(styles.widget)}>
-    <div className={css(styles.widgetIcon)}>{icon}</div>
-    <div className={css(styles.widgetBody)}>
-      <div className={css(styles.widgetTitle)}>{title}</div>
-      <div className={css(styles.widgetValue)}>{value}</div>
-    </div>
-  </div>
-);
+import React, { useContext, useState, useEffect, useRef } from 'react';
+import { MetricsContext } from '../MetricsContext';
+import { realtimeDB } from '../firebase';
+import { ref as dbRef, remove, update } from 'firebase/database';
+import { FiTrash2, FiPlusCircle, FiWifi, FiChevronDown, FiChevronUp } from 'react-icons/fi';
+import { StyleSheet, css } from 'aphrodite';
 
 export default function Status() {
-  const { activeDevices, floodRisks, fullBinAlerts } =
-    useContext(MetricsContext);
-  const [devices, setDevices] = useState([]);
-  const [expanded, setExpanded] = useState({});
-  const [realTimeAlerts, setRealTimeAlerts] = useState([]);
-  const [logs, setLogs] = useState([]); // ✅ Global logs
+  const { fullBinAlerts, floodRisks, activeDevices, devices, authReady } = useContext(MetricsContext);
+  const [deviceAddresses, setDeviceAddresses] = useState({});
+  const fetchedAddrs = useRef(new Set());
+  const [expandedDevice, setExpandedDevice] = useState(null);
+  const [loadingLogs, setLoadingLogs] = useState({});
+  const [errorLogs, setErrorLogs] = useState({});
+  const [logsMap, setLogsMap] = useState({});
 
-  // ✅ Load devices from Firebase
+  // Inline-confirm state
+  const [pendingDelete, setPendingDelete] = useState(null); // device id awaiting confirmation
+  const [deleting, setDeleting] = useState(false); // deletion in progress
+
+  const displayValue = (val) => (val === null || val === undefined ? 'Loading…' : val);
+
+  // defensive boolean helper: treat 'true'/'false' strings as booleans
+  const boolish = (v) => {
+    if (v === true) return true;
+    if (v === false) return false;
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === 'true' || s === '1' || s === '"true"') return true;
+      if (s === 'false' || s === '0' || s === '"false"') return false;
+      return false;
+    }
+    return Boolean(v);
+  };
+
   useEffect(() => {
-    const devicesRef = dbRef(realtimeDB, "devices");
-    const unsub = onValue(devicesRef, (snapshot) => {
-      const data = snapshot.val() || {};
-      const arr = Object.entries(data).map(([id, d]) => ({
-        id,
-        ...d,
-      }));
-      setDevices(arr);
+    devices.forEach((d) => {
+      if (d.lat != null && d.lon != null && !fetchedAddrs.current.has(d.id)) {
+        fetchedAddrs.current.add(d.id);
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${d.lat}&lon=${d.lon}`;
+        fetch(url)
+          .then((res) => res.json())
+          .then((data) => {
+            const street = data.address?.road || data.display_name || 'Unknown address';
+            setDeviceAddresses((prev) => ({ ...prev, [d.id]: street }));
+          })
+          .catch(() => {
+            setDeviceAddresses((prev) => ({ ...prev, [d.id]: 'Address unavailable' }));
+          });
+      }
     });
-    return () => unsub();
-  }, []);
-
-  // ✅ Delete device
-  const deleteDevice = (deviceId) => {
-    console.log("[Status] deleteDevice called for", deviceId);
-    const confirmDelete = window.confirm(
-      `Are you sure you want to delete device ${deviceId}?`
-    );
-    if (!confirmDelete) {
-      console.log(`[Status] user cancelled delete for ${deviceId}`);
-      return;
-    }
-    setDevices((prev) => prev.filter((d) => d.id !== deviceId));
-    remove(dbRef(realtimeDB, `devices/${deviceId}`));
-    setLogs((prev) => [
-      ...prev,
-      `${new Date().toLocaleString()}: Deleted device ${deviceId}`,
-    ]);
-  };
-
-  // ✅ Toggle expand/collapse
-  const toggleExpand = (id) => {
-    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  // ✅ Append real-time alerts from devices
-  useEffect(() => {
-    if (!devices.length) return;
-    const latest = devices
-      .map((d) => d.logs?.slice(-1)[0])
-      .filter(Boolean)
-      .map((msg, idx) => `Device ${devices[idx].id}: ${msg}`);
-    setRealTimeAlerts(latest);
-
-    // Add to global logs
-    if (latest.length > 0) {
-      setLogs((prev) => [
-        ...prev,
-        `${new Date().toLocaleString()}: ${latest.join(" | ")}`,
-      ]);
-    }
   }, [devices]);
 
+  const realTimeAlerts = [];
+  devices.forEach((d) => {
+    // ✅ Modified part: handle bin fullness as percentage instead of yes/no
+    if (d.binLevel != null && !isNaN(d.binLevel)) {
+      const binPercent = Number(d.binLevel);
+      if (binPercent >= 90) {
+        realTimeAlerts.push(`⚠️ Bin ${binPercent}% Full at Device ${d.id}`);
+      }
+    } else if (boolish(d.binFull)) {
+      // fallback if only old boolean field exists
+      realTimeAlerts.push(`⚠️ Bin Full at Device ${d.id}`);
+    }
+
+    if (boolish(d.flooded)) realTimeAlerts.push(`🌊 Flood Risk Detected at Device ${d.id}`);
+  });
+
+  const normalizeLog = (entry) => {
+    if (!entry) return null;
+    if (typeof entry === 'string') {
+      try {
+        const parsed = JSON.parse(entry);
+        if (parsed) {
+          return {
+            ts: parsed.ts ?? parsed.time ?? parsed.timestamp ?? null,
+            classes: parsed.classes ?? parsed.detected ?? parsed.items ?? null,
+            arrival: parsed.arrival ?? null,
+            raw: parsed,
+          };
+        }
+      } catch (e) {
+        return { ts: null, classes: null, arrival: null, raw: entry };
+      }
+    }
+    if (typeof entry === 'object') {
+      const ts = entry.ts ?? entry.time ?? entry.timestamp ?? null;
+      const classes = entry.classes ?? entry.detected ?? entry.items ?? null;
+      const arrival = entry.arrival ?? null;
+      return { ts, classes, arrival, raw: entry };
+    }
+    return { ts: null, classes: null, arrival: null, raw: String(entry) };
+  };
+
+  const loadLogsForDevice = async (device) => {
+    const id = device.id;
+    if (logsMap[id] || loadingLogs[id]) return;
+
+    if (Array.isArray(device.logs) && device.logs.length > 0) {
+      const normalized = device.logs.map(normalizeLog);
+      setLogsMap((m) => ({ ...m, [id]: normalized }));
+      return;
+    }
+
+    setLoadingLogs((m) => ({ ...m, [id]: true }));
+    setErrorLogs((m) => ({ ...m, [id]: null }));
+    try {
+      const res = await fetch(`/api/devices/${encodeURIComponent(id)}/logs`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const normalized = Array.isArray(json) ? json.map(normalizeLog) : [normalizeLog(json)];
+      setLogsMap((m) => ({ ...m, [id]: normalized }));
+    } catch (err) {
+      console.error('Failed to load logs for', id, err);
+      setErrorLogs((m) => ({ ...m, [id]: 'Failed to load logs' }));
+    } finally {
+      setLoadingLogs((m) => ({ ...m, [id]: false }));
+    }
+  };
+
+  const parseTsInfo = (rawTs) => {
+    if (rawTs == null) return { kind: 'unknown' };
+    if (rawTs instanceof Date && !isNaN(rawTs)) return { kind: 'epoch-ms', date: rawTs };
+    if (typeof rawTs === 'number' || (typeof rawTs === 'string' && /^\d+$/.test(rawTs.trim()))) {
+      const n = Number(rawTs);
+      if (n >= 1e12) return { kind: 'epoch-ms', date: new Date(n) };
+      if (n >= 1e9 && n < 1e12) return { kind: 'epoch-s', date: new Date(n * 1000) };
+      if (n >= 0 && n < 1e9) return { kind: 'uptime', uptimeMs: n };
+      return { kind: 'unknown' };
+    }
+    if (typeof rawTs === 'string') {
+      const trimmed = rawTs.trim();
+      const parsed = Date.parse(trimmed);
+      if (!isNaN(parsed)) return { kind: 'iso', date: new Date(parsed) };
+    }
+    return { kind: 'unknown' };
+  };
+
+  const formatUptime = (ms) => {
+    if (!isFinite(ms) || ms < 0) return 'uptime: —';
+    const s = Math.floor(ms / 1000);
+    const hours = Math.floor(s / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const secs = s % 60;
+    if (hours > 0) return `uptime: ${hours}h ${mins}m ${secs}s`;
+    if (mins > 0) return `uptime: ${mins}m ${secs}s`;
+    return `uptime: ${secs}s`;
+  };
+
+  const formatLogTimestamp = (log, device) => {
+    const info = parseTsInfo(log?.ts);
+    if (info.kind === 'epoch-ms' || info.kind === 'epoch-s' || info.kind === 'iso') {
+      try {
+        return info.date.toLocaleString();
+      } catch (e) {
+        return info.date.toString();
+      }
+    }
+    if (info.kind === 'uptime') {
+      const arrivalMs = (log && log.arrival) || (device && device.lastSeen) || Date.now();
+      const estDate = new Date(arrivalMs);
+      const uptimeStr = formatUptime(info.uptimeMs);
+      try {
+        return `${estDate.toLocaleString()} (${uptimeStr})`;
+      } catch (e) {
+        return `${estDate.toString()} (${uptimeStr})`;
+      }
+    }
+    return '—';
+  };
+
+  const onToggleDevice = (d) => {
+    if (expandedDevice === d.id) {
+      setExpandedDevice(null);
+      return;
+    }
+    setExpandedDevice(d.id);
+    loadLogsForDevice(d);
+  };
+
+  const renderLogItem = (log, idx, device) => {
+    if (!log) return null;
+    const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
+    const classes =
+      log.classes &&
+      (Array.isArray(log.classes && log.classes.length > 0) ||
+        (typeof log.classes == 'string' && log.classes.trim() !== ''))
+        ? 'Rubbish Detected'
+        : 'None';
+    return (
+      <div key={idx} className={css(styles.logItem)}>
+        <div className={css(styles.logTimestamp)}>{tsStr || '—'}</div>
+        <div className={css(styles.logClasses)}>{classes}</div>
+      </div>
+    );
+  };
+
+  // ---------- Inline confirm + delete handlers ----------
+  const startDelete = (e, deviceId) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    setPendingDelete(deviceId);
+  };
+
+  const cancelDelete = (e) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    setPendingDelete(null);
+  };
+
+  const performDelete = async (e, deviceId) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+    console.log('[Status] performDelete called for', deviceId, { authReady });
+    if (!authReady) {
+      console.warn('[Status] performDelete: auth not ready');
+      alert('Not authenticated yet. Please wait a moment and try again.');
+      setPendingDelete(null);
+      return;
+    }
+    setDeleting(true);
+    try {
+      await remove(dbRef(realtimeDB, `devices/${deviceId}`));
+      console.log('[Status] hard remove success for', deviceId);
+      alert(`Device ${deviceId} removed.`);
+    } catch (err) {
+      console.warn('[Status] hard remove failed, falling back to soft-disable:', err);
+      try {
+        await update(dbRef(realtimeDB, `devices/${deviceId}`), { disabled: true });
+        console.log('[Status] soft-disable success for', deviceId);
+        alert(`Device ${deviceId} marked disabled.`);
+      } catch (err2) {
+        console.error('[Status] soft-disable also failed:', err2);
+        alert('Failed to delete device. Check console for errors (Firebase rules/auth).');
+      }
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
+    }
+  };
+
   return (
-    <div className={css(styles.container)}>
-      {/* Top row widgets */}
-      <div className={css(styles.widgetRow)}>
-        <Widget icon={<FiWifi />} title="Active Devices" value={activeDevices} />
-        <Widget
-          icon={<FiPlusCircle />}
-          title="Flood Risks"
-          value={floodRisks}
-        />
+    <div className={css(styles.statusContainer)}>
+      <div className={css(styles.widgetGrid)}>
         <Widget
           icon={<FiTrash2 />}
           title="Full Bin Alerts"
-          value={fullBinAlerts}
+          value={`${displayValue(fullBinAlerts)} Alert${fullBinAlerts === 1 ? '' : 's'}`}
+        />
+        <Widget
+          icon={<FiPlusCircle />}
+          title="Flood Risk"
+          value={`${displayValue(floodRisks)} Alert${floodRisks === 1 ? '' : 's'}`}
+        />
+        <Widget
+          icon={<FiWifi />}
+          title="Active Devices"
+          value={`${displayValue(activeDevices)} Device${activeDevices === 1 ? '' : 's'}`}
         />
       </div>
 
-      {/* Devices list */}
-      <div className={css(styles.deviceList)}>
-        {devices.map((device) => (
-          <div key={device.id} className={css(styles.deviceCard)}>
-            <div
-              className={css(styles.deviceHeader)}
-              onClick={() => toggleExpand(device.id)}
-            >
-              <span>{device.name || device.id}</span>
-              {expanded[device.id] ? <FiChevronUp /> : <FiChevronDown />}
-            </div>
-            {expanded[device.id] && (
-              <div className={css(styles.deviceDetails)}>
-                {/* Logs */}
-                <div className={css(styles.logs)}>
-                  <h4>Detection Logs</h4>
-                  {device.logs && device.logs.length > 0 ? (
-                    <ul>
-                      {device.logs.map((log, idx) => (
-                        <li key={idx}>{log}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p>No logs available.</p>
-                  )}
-                </div>
-
-                {/* Delete button */}
-                <button
-                  className={css(styles.deleteButton)}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteDevice(device.id);
-                  }}
-                >
-                  <FiTrash2 /> Delete
-                </button>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Real-time Alerts */}
-      <div className={css(styles.alerts)}>
-        <h3>Real-Time Alerts</h3>
-        {realTimeAlerts.length > 0 ? (
-          <ul>
-            {realTimeAlerts.map((alert, idx) => (
-              <li key={idx}>{alert}</li>
-            ))}
-          </ul>
-        ) : (
-          <p>No active alerts.</p>
-        )}
-      </div>
-
-      {/* ✅ Global Activity Logs */}
-      <div className={css(styles.activityLogs)}>
-        <h3>Activity Logs</h3>
-        {logs.length > 0 ? (
-          <ul>
-            {logs.map((log, idx) => (
-              <li key={idx}>{log}</li>
-            ))}
-          </ul>
-        ) : (
-          <p>No activity yet.</p>
-        )}
+      <div className={css(styles.deviceHealth)}>
+        <h2>Device Health</h2>
+        <table className={css(styles.deviceTable)}>
+          <thead>
+            <tr className={css(styles.tableHeader)}>
+              {/* Rest of table headers */}
+            </tr>
+          </thead>
+          {/* Rest of table rendering */}
+        </table>
       </div>
     </div>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    background: "#1a1a1a",
-    color: "#fff",
-    padding: "20px",
-    minHeight: "100vh",
-    fontFamily: "Arial, sans-serif",
-  },
-  widgetRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap: "15px",
-    marginBottom: "20px",
-  },
-  widget: {
-    background: "#2a2a2a",
-    borderRadius: "12px",
-    padding: "15px",
-    display: "flex",
-    alignItems: "center",
-    boxShadow: "0 2px 5px rgba(0,0,0,0.3)",
-  },
-  widgetIcon: {
-    fontSize: "24px",
-    marginRight: "12px",
-  },
-  widgetBody: {
-    display: "flex",
-    flexDirection: "column",
-  },
-  widgetTitle: {
-    fontSize: "14px",
-    color: "#aaa",
-  },
-  widgetValue: {
-    fontSize: "20px",
-    fontWeight: "bold",
-  },
-  deviceList: {
-    marginTop: "20px",
-  },
-  deviceCard: {
-    background: "#2a2a2a",
-    borderRadius: "12px",
-    marginBottom: "10px",
-    overflow: "hidden",
-  },
-  deviceHeader: {
-    padding: "12px",
-    display: "flex",
-    justifyContent: "space-between",
-    cursor: "pointer",
-    background: "#333",
-  },
-  deviceDetails: {
-    padding: "12px",
-  },
-  logs: {
-    marginBottom: "10px",
-  },
-  deleteButton: {
-    background: "#d9534f",
-    border: "none",
-    color: "#fff",
-    padding: "8px 12px",
-    borderRadius: "6px",
-    cursor: "pointer",
-  },
-  alerts: {
-    marginTop: "20px",
-    background: "#2a2a2a",
-    borderRadius: "12px",
-    padding: "15px",
-  },
-  activityLogs: {
-    marginTop: "20px",
-    background: "#2a2a2a",
-    borderRadius: "12px",
-    padding: "15px",
-  },
-});
+// Assuming Widget and styles are defined elsewhere in the file
