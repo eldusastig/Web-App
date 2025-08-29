@@ -27,15 +27,13 @@ export const MetricsProvider = ({ children }) => {
   // MQTT will check this to avoid re-creating removed DB entries.
   const dbIdsRef = useRef(new Set());
 
-  // Keep a quick ref to the current devices array (helps if MQTT messages arrive
-  // before some async state updates settle)
-  const devicesRef = useRef([]);
-  useEffect(() => { devicesRef.current = devices; }, [devices]);
-
   // Tunables
   const ACTIVE_CUTOFF_MS = 8000;  // device considered offline if not seen in 8s
   const PRUNE_INTERVAL_MS = 2000; // prune every 2s
   const MAX_LOGS_PER_DEVICE = 50; // bounded logs per device
+
+  // Threshold for "full bin" alert (percentage)
+  const BIN_FULL_ALERT_PCT = 90;
 
   // --- Boolean normalization helper ---
   const KNOWN_BOOL_KEYS = [
@@ -66,6 +64,33 @@ export const MetricsProvider = ({ children }) => {
     return out;
   }
 
+  // --- parse fill percentage safely ---
+  function parseFillPct(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    // prefer fillPct key (published by updated ESP32)
+    const candidates = ['fillPct', 'fill_pct', 'binFillPct', 'bin_fill_pct', 'fill'];
+    for (const k of candidates) {
+      if (Object.prototype.hasOwnProperty.call(payload, k)) {
+        const v = payload[k];
+        if (v === null || v === undefined) continue;
+        if (typeof v === 'number' && isFinite(v)) {
+          return Math.max(0, Math.min(100, Math.round(v)));
+        }
+        if (typeof v === 'string') {
+          const num = Number(v.trim());
+          if (!Number.isNaN(num)) return Math.max(0, Math.min(100, Math.round(num)));
+        }
+      }
+    }
+    // fallback: if payload has a boolean binFull:true => treat as 100 (backwards compat)
+    if (Object.prototype.hasOwnProperty.call(payload, 'binFull') || Object.prototype.hasOwnProperty.call(payload, 'bin_full')) {
+      const bf = payload.binFull ?? payload.bin_full;
+      if (bf === true) return 100;
+      if (bf === false) return null;
+    }
+    return null;
+  }
+
   // --- Firebase auth ---
   useEffect(() => {
     const auth = getAuth();
@@ -85,9 +110,9 @@ export const MetricsProvider = ({ children }) => {
     if (!authReady) return;
 
     console.log('🏁 mounting devices listener (firebase authoritative)');
-    const devicesRefDb = ref(realtimeDB, 'devices');
+    const devicesRef = ref(realtimeDB, 'devices');
 
-    const unsubDevices = onValue(devicesRefDb, (snap) => {
+    const unsubDevices = onValue(devicesRef, (snap) => {
       const data = snap.val() || {};
       // Convert object map -> array of device objects
       const arr = Object.entries(data).map(([id, vals]) => ({ id, ...vals }));
@@ -108,7 +133,6 @@ export const MetricsProvider = ({ children }) => {
         } else if (d.logs && typeof d.logs === 'object') {
           // d.logs is an object keyed by push-id -> entry. Convert to array, attach key, sort by timestamp.
           logsArr = Object.entries(d.logs).map(([pushKey, val]) => {
-            // keep pushKey if useful for deletion/identification
             if (val && typeof val === 'object') return { _key: pushKey, ...val };
             return { _key: pushKey, raw: val };
           });
@@ -125,12 +149,17 @@ export const MetricsProvider = ({ children }) => {
           logsArr = [];
         }
 
+        // compute binFillPct for DB-stored telemetry if any (DB may contain last known fields)
+        const dbFillPct = parseFillPct(d);
+
         return {
           ...d,
           id,
           online: p ? p.online : (d.online || false),
           lastSeen: p ? p.lastSeen : (d.lastSeen || null),
           logs: logsArr,
+          binFillPct: dbFillPct ?? (d.binFull === true ? 100 : null),
+          binFull: (dbFillPct != null ? dbFillPct >= BIN_FULL_ALERT_PCT : (d.binFull === true)),
         };
       });
 
@@ -140,17 +169,17 @@ export const MetricsProvider = ({ children }) => {
     return () => unsubDevices();
   }, [authReady]);
 
-  // update devicesRef when setDevices changes (already handled by second useEffect above but keep safe)
-  useEffect(() => { devicesRef.current = devices; }, [devices]);
-
   // --- helper: push bounded log into device entry (only if device exists in DB) ---
   const pushDeviceLog = (deviceId, logObj) => {
     if (!dbIdsRef.current.has(String(deviceId))) {
       // device was deleted from DB -> do not keep re-adding logs in UI
-      // However, if the device is present in the current in-memory devices (rare race), allow.
-      const known = devicesRef.current.some((d) => String(d.id) === String(deviceId));
-      if (!known) return;
+      return;
     }
+
+    // compute fill pct if present in logObj
+    const pct = parseFillPct(logObj);
+
+    if (pct != null) logObj.fillPct = pct; // keep consistent key on logs
 
     setDevices((prev) => {
       const idx = prev.findIndex((d) => String(d.id) === String(deviceId));
@@ -162,12 +191,15 @@ export const MetricsProvider = ({ children }) => {
           logs: [logObj, ...prevLogs].slice(0, MAX_LOGS_PER_DEVICE),
           lastSeen: Date.now(),
           online: true,
+          // update binFillPct if log provided
+          binFillPct: (pct != null) ? pct : (updated[idx].binFillPct ?? null),
+          binFull: ((pct != null) ? (pct >= BIN_FULL_ALERT_PCT) : (updated[idx].binFull ?? false)),
         };
         return updated;
       }
       // shouldn't happen because we only push logs for DB-known devices,
-      // but be defensive: insert at front (non-persistent until DB confirms)
-      return [{ id: String(deviceId), logs: [logObj], lastSeen: Date.now(), online: true }, ...prev];
+      // but be defensive: insert at front
+      return [{ id: String(deviceId), logs: [logObj], lastSeen: Date.now(), online: true, binFillPct: pct ?? null, binFull: (pct != null) ? (pct >= BIN_FULL_ALERT_PCT) : false }, ...prev];
     });
   };
 
@@ -211,12 +243,6 @@ export const MetricsProvider = ({ children }) => {
       });
     });
 
-    // helpful lifecycle logs to debug missing/abrupt disconnects
-    client.on('reconnect', () => console.warn('MQTT reconnecting...'));
-    client.on('close', () => console.warn('MQTT connection closed'));
-    client.on('offline', () => console.warn('MQTT offline'));
-    client.on('error', (err) => console.error('MQTT error', err));
-
     client.on('message', (topic, message) => {
       const txt = (message || '').toString();
       let payload = null;
@@ -228,17 +254,12 @@ export const MetricsProvider = ({ children }) => {
 
       const parts = topic.split('/');
 
-      // --- Detections: keep logs only for DB-known devices (or known in-memory devices) ---
+      // --- Detections: keep logs only for DB-known devices ---
       if (parts.length >= 4 && parts[0] === 'esp32' && parts[2] === 'sensor' && parts[3] === 'detections') {
         const id = (payload && (payload.id ?? parts[1])) || parts[1];
-
-        // If device not in DB snapshot, but present in in-memory devices (race), allow.
-        const knownInDb = dbIdsRef.current.has(String(id));
-        const knownInMemory = devicesRef.current.some((d) => String(d.id) === String(id));
-        if (!knownInDb && !knownInMemory) {
+        if (!dbIdsRef.current.has(String(id))) {
           // dropped: device removed from DB, don't re-add logs
           console.debug('Detections for unknown/deleted device ignored:', id);
-          // still update presenceRef so activeDevices metric can reflect MQTT presence if you want
           presenceRef.current.set(String(id), { online: true, lastSeen: Date.now() });
           setActiveDevices(Array.from(presenceRef.current.values()).filter(p => p.online).length);
           return;
@@ -304,8 +325,6 @@ export const MetricsProvider = ({ children }) => {
               };
               return updated;
             }
-            // DB contains it but local array didn't — this is rare because Firebase snapshot should have added it,
-            // but be defensive: add it (pulling from DB will fill the full record shortly).
             return [{ id, online: onlineFlag, lastSeen: onlineFlag ? now : null }, ...prev];
           });
         }
@@ -334,14 +353,33 @@ export const MetricsProvider = ({ children }) => {
 
       // Merge telemetry into devices state (safe because device exists in DB)
       const payloadToMerge = payload && typeof payload === 'object' ? payload : {};
+      const parsedFill = parseFillPct(payloadToMerge);
+
       setDevices((prev) => {
         const idx = prev.findIndex((d) => String(d.id) === String(deviceId));
         if (idx > -1) {
           const updated = [...prev];
-          updated[idx] = { ...updated[idx], ...payloadToMerge, id: String(deviceId), lastSeen: now, online: true };
+          updated[idx] = {
+            ...updated[idx],
+            ...payloadToMerge,
+            id: String(deviceId),
+            lastSeen: now,
+            online: true,
+            // attach computed binFillPct and binFull boolean (alert if >= BIN_FULL_ALERT_PCT)
+            binFillPct: parsedFill != null ? parsedFill : (payloadToMerge.binFillPct ?? updated[idx].binFillPct ?? (payloadToMerge.binFull === true ? 100 : null)),
+            binFull: (parsedFill != null ? (parsedFill >= BIN_FULL_ALERT_PCT) : (payloadToMerge.binFull === true ? true : updated[idx].binFull ?? false)),
+          };
           return updated;
         }
-        return [{ id: String(deviceId), ...payloadToMerge, lastSeen: now, online: true }, ...prev];
+        // if device somehow missing locally, create one with telemetry merged
+        return [{
+          id: String(deviceId),
+          ...payloadToMerge,
+          lastSeen: now,
+          online: true,
+          binFillPct: parsedFill != null ? parsedFill : (payloadToMerge.binFillPct ?? (payloadToMerge.binFull === true ? 100 : null)),
+          binFull: parsedFill != null ? (parsedFill >= BIN_FULL_ALERT_PCT) : (payloadToMerge.binFull === true ? true : false),
+        }, ...prev];
       });
 
       try {
@@ -351,6 +389,8 @@ export const MetricsProvider = ({ children }) => {
         console.warn('Firebase update exception', e);
       }
     });
+
+    client.on('error', (err) => console.error('MQTT error', err));
 
     return () => {
       try { client.end(true); } catch (e) { /* ignore */ }
@@ -396,7 +436,12 @@ export const MetricsProvider = ({ children }) => {
 
   // --- derived metrics ---
   useEffect(() => {
-    setFullBinAlerts(devices.filter((d) => d.binFull).length);
+    // count only devices that are actually >= threshold
+    setFullBinAlerts(devices.filter((d) => {
+      if (typeof d.binFillPct === 'number') return d.binFillPct >= BIN_FULL_ALERT_PCT;
+      return Boolean(d.binFull); // fallback if only boolean present
+    }).length);
+
     setFloodRisks(devices.filter((d) => d.flooded).length);
   }, [devices]);
 
