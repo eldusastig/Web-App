@@ -1,8 +1,8 @@
 // src/components/Status.jsx
 import React, { useContext, useState, useEffect, useRef } from 'react';
 import { MetricsContext } from '../MetricsContext';
-import { realtimeDB } from '../firebase';
-import { ref as dbRef, remove, update } from 'firebase/database';
+import { realtimeDB } from '../firebase2';
+import { ref as dbRef, remove, update, set } from 'firebase/database';
 import { FiTrash2, FiPlusCircle, FiWifi, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import { StyleSheet, css } from 'aphrodite';
 
@@ -289,7 +289,7 @@ export default function Status() {
     );
   };
 
-  // ---------- Inline confirm + delete handlers ----------
+  // ---------- FIXED: Inline confirm + delete handlers ----------
   const startDelete = (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     setPendingDelete(deviceId);
@@ -300,9 +300,11 @@ export default function Status() {
     setPendingDelete(null);
   };
 
+  // THIS IS THE FIXED DELETE FUNCTION - PREVENTS DEVICE RECREATION
   const performDelete = async (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     console.log('[Status] performDelete called for', deviceId, { authReady });
+    
     if (!authReady) {
       console.warn('[Status] performDelete: auth not ready');
       alert('Not authenticated yet. Please wait a moment and try again.');
@@ -312,20 +314,20 @@ export default function Status() {
 
     setDeleting(true);
     try {
+      // STEP 1: Add device to deleted_devices list (use set() for boolean values)
+      console.log('[Status] Adding device to deleted_devices list:', deviceId);
+      await set(dbRef(realtimeDB, `deleted_devices/${deviceId}`), true);
+      
+      // STEP 2: Remove device from devices collection
+      console.log('[Status] Removing device from devices collection:', deviceId);
       await remove(dbRef(realtimeDB, `devices/${deviceId}`));
-      console.log('[Status] hard remove success for', deviceId);
-      // UI will refresh from Firebase onValue listener
-      alert(`Device ${deviceId} removed.`);
+      
+      console.log('[Status] Device successfully deleted and marked as deleted:', deviceId);
+      alert(`Device ${deviceId} permanently removed. It will not be recreated from MQTT messages.`);
+      
     } catch (err) {
-      console.warn('[Status] hard remove failed, falling back to soft-disable:', err);
-      try {
-        await update(dbRef(realtimeDB, `devices/${deviceId}`), { disabled: true });
-        console.log('[Status] soft-disable success for', deviceId);
-        alert(`Device ${deviceId} marked disabled.`);
-      } catch (err2) {
-        console.error('[Status] soft-disable also failed:', err2);
-        alert('Failed to delete device. Check console for errors (Firebase rules/auth).');
-      }
+      console.error('[Status] Delete operation failed:', err);
+      alert(`Failed to delete device: ${err.message}`);
     } finally {
       setDeleting(false);
       setPendingDelete(null);
@@ -376,7 +378,7 @@ export default function Status() {
                     </td>
                     <td>{d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—'}</td>
                     <td className={css(boolish(d.flooded) ? styles.alert : styles.ok)}>{boolish(d.flooded) ? 'Yes' : 'No'}</td>
-                    <td className={css(boolish(d.binFull) ? styles.alert : styles.ok)}>  {d.binFillPct != null ? `${d.binFillPct}%` : '—'}</td>
+                    <td className={css(boolish(d.binFull) ? styles.alert : styles.ok)}>  {d.fillPct != null ? `${d.fillPct}%` : '-'}</td>
                     <td className={css(boolish(d.active) || boolish(d.online) ? styles.ok : styles.alert)}>{boolish(d.active) || boolish(d.online) ? 'Yes' : 'No'}</td>
 
                     {/* Actions cell: stop row-level clicks and show inline confirm when needed */}
