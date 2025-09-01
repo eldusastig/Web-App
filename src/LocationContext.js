@@ -1,6 +1,6 @@
 
 import React, { createContext, useState, useEffect } from 'react';
-import { realtimeDB } from './firebase';
+import { realtimeDB } from './firebase2';
 import { ref, onValue } from 'firebase/database';
 
 export const LocationContext = createContext({
@@ -31,3 +31,4 @@ export const LocationProvider = ({ children }) => {
 };
 
   
+
