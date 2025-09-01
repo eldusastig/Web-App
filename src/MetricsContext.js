@@ -2,7 +2,7 @@
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 import { realtimeDB } from './firebase2';
-import { ref, onValue, update } from 'firebase/database';
+import { ref, onValue, update, get } from 'firebase/database';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
 export const MetricsContext = createContext({
@@ -222,30 +222,77 @@ export const MetricsProvider = ({ children }) => {
       }
 
       const parts = topic.split('/');
-      const id = (payload && (payload.id ?? parts[1])) || parts[1]; // ✅ Moved here for global use
+      const id = (payload && (payload.id ?? parts[1])) || parts[1]; // Device ID extraction
 
+      // Handle detection messages with deleted device check
       if (parts.length >= 4 && parts[0] === 'esp32' && parts[2] === 'sensor' && parts[3] === 'detections') {
         if (!dbIdsRef.current.has(String(id))) {
-          console.warn(`New device detected: ${id}. Auto-creating in Firebase...`);
-          update(ref(realtimeDB, `devices/${id}`), {
-            createdAt: Date.now(),
-            lastSeen: Date.now(),
-            online: true,
-            autoCreated: true
-          })
-          .then(() => {
-            dbIdsRef.current.add(String(id));
-          })
-          .catch((e) => {
-            console.error('Failed to auto-create device', e);
+          // Check if device is deleted before auto-creating
+          const deletedRef = ref(realtimeDB, `deleted_devices/${id}`);
+          get(deletedRef).then((snap) => {
+            if (snap.exists() && snap.val()) {
+              console.log(`Device ${id} is deleted, ignoring MQTT message`);
+              return;
+            }
+            
+            console.warn(`New device detected: ${id}. Auto-creating in Firebase...`);
+            update(ref(realtimeDB, `devices/${id}`), {
+              createdAt: Date.now(),
+              lastSeen: Date.now(),
+              online: true,
+              autoCreated: true
+            })
+            .then(() => {
+              dbIdsRef.current.add(String(id));
+              // Process the message after device creation
+              const logObj = payload ? { ...payload } : { raw: txt, ts: Date.now() };
+              if (logObj.ts === undefined || logObj.ts === null) logObj.ts = Date.now();
+              logObj.arrival = Date.now();
+              
+              pushDeviceLog(id, logObj);
+              
+              const now = Date.now();
+              presenceRef.current.set(String(id), { online: true, lastSeen: now });
+              setActiveDevices(Array.from(presenceRef.current.values()).filter(p => p.online).length);
+            })
+            .catch((e) => {
+              console.error('Failed to auto-create device', e);
+            });
+          }).catch((e) => {
+            console.error('Failed to check deleted_devices', e);
           });
+        } else {
+          // Device exists in DB, process normally
+          const logObj = payload ? { ...payload } : { raw: txt, ts: Date.now() };
+          if (logObj.ts === undefined || logObj.ts === null) logObj.ts = Date.now();
+          logObj.arrival = Date.now();
+          
+          pushDeviceLog(id, logObj);
+          
+          const now = Date.now();
+          presenceRef.current.set(String(id), { online: true, lastSeen: now });
+          setActiveDevices(Array.from(presenceRef.current.values()).filter(p => p.online).length);
         }
-        console.debug('Detections for unknown/deleted device ignored:', id);
-        presenceRef.current.set(String(id), { online: true, lastSeen: Date.now() });
-        setActiveDevices(Array.from(presenceRef.current.values()).filter(p => p.online).length);
+        
+        // Update lastDetection in Firebase for existing devices
+        if (dbIdsRef.current.has(String(id))) {
+          const logObj = payload ? { ...payload } : { raw: txt, ts: Date.now() };
+          if (logObj.ts === undefined || logObj.ts === null) logObj.ts = Date.now();
+          
+          try {
+            update(ref(realtimeDB, `devices/${id}/lastDetection`), {
+              topClass: logObj.topClass ?? null,
+              ts: logObj.ts ?? logObj.arrival,
+            }).catch((err) => console.warn('Firebase update failed for lastDetection', err));
+          } catch (e) {
+            console.warn('Firebase update exception', e);
+          }
+        }
+        
         return;
       }
 
+      // Handle non-detection messages (status, sensors, etc.)
       const logObj = payload ? { ...payload } : { raw: txt, ts: Date.now() };
       if (logObj.ts === undefined || logObj.ts === null) logObj.ts = Date.now();
       logObj.arrival = Date.now();
@@ -264,7 +311,6 @@ export const MetricsProvider = ({ children }) => {
       } catch (e) {
         console.warn('Firebase update exception', e);
       }
-      return;
     });
 
     client.on('error', (err) => console.error('MQTT error', err));
