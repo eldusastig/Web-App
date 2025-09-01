@@ -47,6 +47,10 @@ export const MetricsProvider = ({ children }) => {
   // Threshold for "full bin" alert (percentage)
   const BIN_FULL_ALERT_PCT = 90;
 
+  // --- Deferred trimming tunables ---
+  const TRIM_DELAY_MS = 1500; // coalesce window (ms)
+  const trimTimers = useRef(new Map()); // deviceId -> timeout id
+
   // --- Boolean normalization helper ---
   const KNOWN_BOOL_KEYS = [
     'online',
@@ -205,42 +209,59 @@ export const MetricsProvider = ({ children }) => {
     });
   };
 
-  // --- Bounded Firebase write helper (CLIENT-TRIM-ON-WRITE) ---
-  // push a log to devices/{id}/logs, then trim oldest entries so total <= MAX_LOGS_PER_DEVICE
+  // --- schedule & deferred trimming helpers (DEFERRED + THROTTLED) ---
+  const scheduleTrimForDevice = (deviceId) => {
+    const cur = trimTimers.current.get(deviceId);
+    if (cur) clearTimeout(cur);
+
+    const t = setTimeout(async () => {
+      trimTimers.current.delete(deviceId);
+      try {
+        const logsRef = ref(realtimeDB, `devices/${deviceId}/logs`);
+        const snap = await get(logsRef);
+        if (!snap.exists()) return;
+
+        const entries = snap.val() || {};
+        const keys = Object.keys(entries);
+        const total = keys.length;
+        const over = total - MAX_LOGS_PER_DEVICE;
+        if (over <= 0) return;
+
+        // build small array [ { key, arrival } ] and sort ascending (oldest first)
+        const arr = keys.map((k) => {
+          const item = entries[k] || {};
+          const arrival = Number(item.arrival ?? item.ts ?? 0) || 0;
+          return { k, arrival };
+        });
+        arr.sort((a, b) => a.arrival - b.arrival);
+
+        const toDelete = arr.slice(0, over).map(x => x.k);
+        for (const key of toDelete) {
+          fbRemove(ref(realtimeDB, `devices/${deviceId}/logs/${key}`))
+            .catch((err) => console.warn('[Metrics] failed to remove old log', deviceId, key, err));
+        }
+      } catch (e) {
+        console.warn('[Metrics] scheduled trim failed', e);
+      }
+    }, TRIM_DELAY_MS);
+
+    trimTimers.current.set(deviceId, t);
+  };
+
+  // --- Bounded Firebase write helper (uses deferred trimming) ---
   const writeBoundedLogToFirebase = async (deviceId, logObj) => {
     if (!deviceId) return;
     try {
-      // ensure we have a monotonic arrival timestamp for ordering
       if (!logObj.arrival) logObj.arrival = Date.now();
-
       const logsRef = ref(realtimeDB, `devices/${deviceId}/logs`);
 
-      // push new log
+      // push new log quickly
       await fbPush(logsRef, logObj);
 
-      // now check total count and remove oldest if over limit
-      const snap = await get(logsRef);
-      if (!snap.exists()) return;
+      // DEFER trimming: schedule a coalesced trim per device
+      scheduleTrimForDevice(deviceId);
 
-      const entries = snap.val() || {};
-      const keys = Object.keys(entries);
-      const total = keys.length;
-      const over = total - MAX_LOGS_PER_DEVICE;
-
-      if (over > 0) {
-        // find the oldest `over` entries ordered by 'arrival' and remove them
-        const oldestQ = query(logsRef, orderByChild('arrival'), limitToFirst(over));
-        const oldestSnap = await get(oldestQ);
-        oldestSnap.forEach((child) => {
-          const key = child.key;
-          if (key) {
-            fbRemove(ref(realtimeDB, `devices/${deviceId}/logs/${key}`))
-              .catch((err) => {
-                console.warn('[Metrics] failed to remove old log', deviceId, key, err);
-              });
-          }
-        });
-      }
+      // done — UI stays snappy because trimming is deferred
     } catch (e) {
       console.warn('[Metrics] writeBoundedLogToFirebase failed', e);
     }
@@ -319,8 +340,7 @@ export const MetricsProvider = ({ children }) => {
         presenceRef.current.set(String(id), { online: true, lastSeen: now });
         setActiveDevices(Array.from(presenceRef.current.values()).filter(p => p.online).length);
 
-        // write bounded log to Firebase (keeps DB trimmed)
-        // fire-and-forget: we don't block UI on the DB write/trim
+        // write bounded log to Firebase (keeps DB trimmed) - deferred trimming
         writeBoundedLogToFirebase(id, logObj);
 
         // optional: write a lastDetection summary to Firebase only if device exists
