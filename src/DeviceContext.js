@@ -1,6 +1,6 @@
 // src/DeviceContext.js
 import React, { createContext, useState, useEffect } from 'react';
-import { realtimeDB } from './firebase';
+import { realtimeDB } from './firebase2';
 import { ref, onValue } from 'firebase/database';
 
 export const DeviceContext = createContext({ devices: [] });
@@ -36,3 +36,4 @@ export const DeviceProvider = ({ children }) => {
     </DeviceContext.Provider>
   );
 };  
+
