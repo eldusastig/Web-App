@@ -259,6 +259,20 @@ export const MetricsProvider = ({ children }) => {
         const id = (payload && (payload.id ?? parts[1])) || parts[1];
         if (!dbIdsRef.current.has(String(id))) {
           // dropped: device removed from DB, don't re-add logs
+          console.warn(`New Device detected: ${id}. Auto-creating in Firebase....`)
+          try{
+            await update(ref(realtimeDB, `devices/${id}`), {
+              createdAt:Date.now(),
+              lastSeen:Date.now(),
+              online:true,
+              autoCreated:true
+              
+            });
+            dbIdsRef.current.add(String(id));
+          }catch(e){
+            console.error('Failed to auto-create device',e);
+          }
+        }
           console.debug('Detections for unknown/deleted device ignored:', id);
           presenceRef.current.set(String(id), { online: true, lastSeen: Date.now() });
           setActiveDevices(Array.from(presenceRef.current.values()).filter(p => p.online).length);
@@ -451,4 +465,5 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
+
 
