@@ -222,9 +222,9 @@ export const MetricsProvider = ({ children }) => {
       }
 
       const parts = topic.split('/');
+      const id = (payload && (payload.id ?? parts[1])) || parts[1]; // ✅ Moved here for global use
 
       if (parts.length >= 4 && parts[0] === 'esp32' && parts[2] === 'sensor' && parts[3] === 'detections') {
-        const id = (payload && (payload.id ?? parts[1])) || parts[1];
         if (!dbIdsRef.current.has(String(id))) {
           console.warn(`New device detected: ${id}. Auto-creating in Firebase...`);
           update(ref(realtimeDB, `devices/${id}`), {
