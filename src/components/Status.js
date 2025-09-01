@@ -1,7 +1,7 @@
 // src/components/Status.jsx
 import React, { useContext, useState, useEffect, useRef } from 'react';
 import { MetricsContext } from '../MetricsContext';
-import { realtimeDB } from '../firebase';
+import { realtimeDB } from '../firebase2';
 import { ref as dbRef, remove, update } from 'firebase/database';
 import { FiTrash2, FiPlusCircle, FiWifi, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import { StyleSheet, css } from 'aphrodite';
