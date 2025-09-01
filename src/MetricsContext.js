@@ -2,7 +2,20 @@
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 import { realtimeDB } from './firebase';
-import { ref, onValue, update } from 'firebase/database';
+
+// Firebase DB helpers (expanded)
+import {
+  ref,
+  onValue,
+  update,
+  push as fbPush,
+  query,
+  orderByChild,
+  limitToFirst,
+  get,
+  remove as fbRemove,
+} from 'firebase/database';
+
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
 export const MetricsContext = createContext({
@@ -24,7 +37,6 @@ export const MetricsProvider = ({ children }) => {
   const presenceRef = useRef(new Map()); // Map<id, { online: boolean, lastSeen: number }>
 
   // Keep set of device IDs from the authoritative Firebase /devices snapshot.
-  // MQTT will check this to avoid re-creating removed DB entries.
   const dbIdsRef = useRef(new Set());
 
   // Tunables
@@ -67,7 +79,6 @@ export const MetricsProvider = ({ children }) => {
   // --- parse fill percentage safely ---
   function parseFillPct(payload) {
     if (!payload || typeof payload !== 'object') return null;
-    // prefer fillPct key (published by updated ESP32)
     const candidates = ['fillPct', 'fill_pct', 'binFillPct', 'bin_fill_pct', 'fill'];
     for (const k of candidates) {
       if (Object.prototype.hasOwnProperty.call(payload, k)) {
@@ -82,7 +93,6 @@ export const MetricsProvider = ({ children }) => {
         }
       }
     }
-    // fallback: if payload has a boolean binFull:true => treat as 100 (backwards compat)
     if (Object.prototype.hasOwnProperty.call(payload, 'binFull') || Object.prototype.hasOwnProperty.call(payload, 'bin_full')) {
       const bf = payload.binFull ?? payload.bin_full;
       if (bf === true) return 100;
@@ -114,7 +124,6 @@ export const MetricsProvider = ({ children }) => {
 
     const unsubDevices = onValue(devicesRef, (snap) => {
       const data = snap.val() || {};
-      // Convert object map -> array of device objects
       const arr = Object.entries(data).map(([id, vals]) => ({ id, ...vals }));
 
       // update dbIdsRef
@@ -131,13 +140,11 @@ export const MetricsProvider = ({ children }) => {
         if (Array.isArray(d.logs)) {
           logsArr = d.logs.slice(0, MAX_LOGS_PER_DEVICE).filter(Boolean);
         } else if (d.logs && typeof d.logs === 'object') {
-          // d.logs is an object keyed by push-id -> entry. Convert to array, attach key, sort by timestamp.
           logsArr = Object.entries(d.logs).map(([pushKey, val]) => {
             if (val && typeof val === 'object') return { _key: pushKey, ...val };
             return { _key: pushKey, raw: val };
           });
 
-          // sort by arrivalServerTs or arrival or ts descending (most recent first)
           logsArr.sort((a, b) => {
             const aTs = Number(a.arrivalServerTs ?? a.arrival ?? a.ts ?? 0);
             const bTs = Number(b.arrivalServerTs ?? b.arrival ?? b.ts ?? 0);
@@ -149,7 +156,6 @@ export const MetricsProvider = ({ children }) => {
           logsArr = [];
         }
 
-        // compute binFillPct for DB-stored telemetry if any (DB may contain last known fields)
         const dbFillPct = parseFillPct(d);
 
         return {
@@ -176,10 +182,9 @@ export const MetricsProvider = ({ children }) => {
       return;
     }
 
-    // compute fill pct if present in logObj
     const pct = parseFillPct(logObj);
 
-    if (pct != null) logObj.fillPct = pct; // keep consistent key on logs
+    if (pct != null) logObj.fillPct = pct;
 
     setDevices((prev) => {
       const idx = prev.findIndex((d) => String(d.id) === String(deviceId));
@@ -191,16 +196,54 @@ export const MetricsProvider = ({ children }) => {
           logs: [logObj, ...prevLogs].slice(0, MAX_LOGS_PER_DEVICE),
           lastSeen: Date.now(),
           online: true,
-          // update binFillPct if log provided
           binFillPct: (pct != null) ? pct : (updated[idx].binFillPct ?? null),
           binFull: ((pct != null) ? (pct >= BIN_FULL_ALERT_PCT) : (updated[idx].binFull ?? false)),
         };
         return updated;
       }
-      // shouldn't happen because we only push logs for DB-known devices,
-      // but be defensive: insert at front
       return [{ id: String(deviceId), logs: [logObj], lastSeen: Date.now(), online: true, binFillPct: pct ?? null, binFull: (pct != null) ? (pct >= BIN_FULL_ALERT_PCT) : false }, ...prev];
     });
+  };
+
+  // --- Bounded Firebase write helper (CLIENT-TRIM-ON-WRITE) ---
+  // push a log to devices/{id}/logs, then trim oldest entries so total <= MAX_LOGS_PER_DEVICE
+  const writeBoundedLogToFirebase = async (deviceId, logObj) => {
+    if (!deviceId) return;
+    try {
+      // ensure we have a monotonic arrival timestamp for ordering
+      if (!logObj.arrival) logObj.arrival = Date.now();
+
+      const logsRef = ref(realtimeDB, `devices/${deviceId}/logs`);
+
+      // push new log
+      await fbPush(logsRef, logObj);
+
+      // now check total count and remove oldest if over limit
+      const snap = await get(logsRef);
+      if (!snap.exists()) return;
+
+      const entries = snap.val() || {};
+      const keys = Object.keys(entries);
+      const total = keys.length;
+      const over = total - MAX_LOGS_PER_DEVICE;
+
+      if (over > 0) {
+        // find the oldest `over` entries ordered by 'arrival' and remove them
+        const oldestQ = query(logsRef, orderByChild('arrival'), limitToFirst(over));
+        const oldestSnap = await get(oldestQ);
+        oldestSnap.forEach((child) => {
+          const key = child.key;
+          if (key) {
+            fbRemove(ref(realtimeDB, `devices/${deviceId}/logs/${key}`))
+              .catch((err) => {
+                console.warn('[Metrics] failed to remove old log', deviceId, key, err);
+              });
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('[Metrics] writeBoundedLogToFirebase failed', e);
+    }
   };
 
   // --- MQTT: telemetry, presence, detections ---
@@ -223,7 +266,6 @@ export const MetricsProvider = ({ children }) => {
 
     client.on('connect', () => {
       console.log('✅ MQTT connected (global)');
-      // telemetry + per-device topics
       client.subscribe('esp32/gps', { qos: 1 });
       client.subscribe('esp32/sensor/flood', { qos: 1 });
       client.subscribe('esp32/sensor/bin_full', { qos: 1 });
@@ -277,6 +319,10 @@ export const MetricsProvider = ({ children }) => {
         presenceRef.current.set(String(id), { online: true, lastSeen: now });
         setActiveDevices(Array.from(presenceRef.current.values()).filter(p => p.online).length);
 
+        // write bounded log to Firebase (keeps DB trimmed)
+        // fire-and-forget: we don't block UI on the DB write/trim
+        writeBoundedLogToFirebase(id, logObj);
+
         // optional: write a lastDetection summary to Firebase only if device exists
         try {
           update(ref(realtimeDB, `devices/${id}/lastDetection`), {
@@ -293,8 +339,6 @@ export const MetricsProvider = ({ children }) => {
       if (parts.length >= 3 && parts[0] === 'esp32' && parts[2] === 'status') {
         const id = String(payload?.id ?? parts[1]);
 
-        // if device not in DB, update presenceRef only (so activeDevices counts can reflect),
-        // but do NOT add it into the devices list (avoids re-creating deleted DB entries).
         let onlineFlag = null;
         if (payload && typeof payload === 'object') {
           if (payload.status && typeof payload.status === 'string') onlineFlag = payload.status.toLowerCase() === 'online';
@@ -311,7 +355,6 @@ export const MetricsProvider = ({ children }) => {
         const now = Date.now();
         presenceRef.current.set(id, { online: onlineFlag, lastSeen: onlineFlag ? now : (presenceRef.current.get(id)?.lastSeen || null) });
 
-        // Update devices list only if the id is present in DB snapshot
         if (dbIdsRef.current.has(id)) {
           setDevices((prev) => {
             const idx = prev.findIndex((d) => String(d.id) === id);
@@ -338,20 +381,15 @@ export const MetricsProvider = ({ children }) => {
       const deviceId = payload?.id ?? (parts.length >= 2 ? parts[1] : undefined);
       if (!deviceId) return;
 
-      // update presenceRef always (we want the active count), but only merge telemetry into devices
-      // if the device exists in DB. That prevents re-creating deleted DB entries.
       const now = Date.now();
       presenceRef.current.set(String(deviceId), { online: true, lastSeen: now });
       setActiveDevices(Array.from(presenceRef.current.values()).filter((p) => p.online).length);
 
       if (!dbIdsRef.current.has(String(deviceId))) {
-        // Device was deleted in DB -> do NOT re-create it from telemetry.
-        // We still keep presenceRef so activeDevices works.
         console.debug('Telemetry for unknown/deleted device ignored:', deviceId);
         return;
       }
 
-      // Merge telemetry into devices state (safe because device exists in DB)
       const payloadToMerge = payload && typeof payload === 'object' ? payload : {};
       const parsedFill = parseFillPct(payloadToMerge);
 
@@ -365,13 +403,11 @@ export const MetricsProvider = ({ children }) => {
             id: String(deviceId),
             lastSeen: now,
             online: true,
-            // attach computed binFillPct and binFull boolean (alert if >= BIN_FULL_ALERT_PCT)
             binFillPct: parsedFill != null ? parsedFill : (payloadToMerge.binFillPct ?? updated[idx].binFillPct ?? (payloadToMerge.binFull === true ? 100 : null)),
             binFull: (parsedFill != null ? (parsedFill >= BIN_FULL_ALERT_PCT) : (payloadToMerge.binFull === true ? true : updated[idx].binFull ?? false)),
           };
           return updated;
         }
-        // if device somehow missing locally, create one with telemetry merged
         return [{
           id: String(deviceId),
           ...payloadToMerge,
@@ -412,7 +448,6 @@ export const MetricsProvider = ({ children }) => {
       });
 
       if (changed) {
-        // Only reflect changes for devices that are present in DB
         setDevices((prev) => {
           const updated = prev.map((d) => {
             const p = presenceRef.current.get(String(d.id));
@@ -422,7 +457,6 @@ export const MetricsProvider = ({ children }) => {
             }
             return d;
           });
-          // Do NOT add presence-only entries here; we rely on DB as the source of truth.
           return updated;
         });
 
@@ -436,10 +470,9 @@ export const MetricsProvider = ({ children }) => {
 
   // --- derived metrics ---
   useEffect(() => {
-    // count only devices that are actually >= threshold
     setFullBinAlerts(devices.filter((d) => {
       if (typeof d.binFillPct === 'number') return d.binFillPct >= BIN_FULL_ALERT_PCT;
-      return Boolean(d.binFull); // fallback if only boolean present
+      return Boolean(d.binFull);
     }).length);
 
     setFloodRisks(devices.filter((d) => d.flooded).length);
