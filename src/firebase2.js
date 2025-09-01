@@ -21,7 +21,7 @@ const firebaseConfig = {
 
   measurementId: "G-58T66X8VP3"
 
-};x
+};
 const app = initializeApp(firebaseConfig);
 // ✅ Initialize Auth and Database
 const auth = getAuth(app);
@@ -32,3 +32,4 @@ signInAnonymously(auth).catch((error) => {
 });
 // ✅ Export for use in other files
 export { auth, realtimeDB };
+
