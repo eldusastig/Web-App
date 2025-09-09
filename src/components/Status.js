@@ -16,6 +16,9 @@ export default function Status() {
   const [errorLogs, setErrorLogs] = useState({});
   const [logsMap, setLogsMap] = useState({});
 
+  // NEW: filter state: 'fullBin' | 'flood' | 'active' | null
+  const [filter, setFilter] = useState(null);
+
   // Inline-confirm state
   const [pendingDelete, setPendingDelete] = useState(null); // device id awaiting confirmation
   const [deleting, setDeleting] = useState(false); // deletion in progress
@@ -60,14 +63,8 @@ export default function Status() {
   });
 
   // ---------------------------
-  // Normalization helpers (NEW/UPDATED)
+  // Normalization helpers (unchanged)
   // ---------------------------
-
-  // Normalize "classes" field into:
-  //  - null => no detections
-  //  - string => single class
-  //  - array => list of classes
-  //  - object => counts or keyed map (only meaningful entries kept)
   function normalizeClasses(raw) {
     if (raw === undefined || raw === null) return null;
 
@@ -77,17 +74,14 @@ export default function Status() {
       return t === '' || /^none$/i.test(t) || /^null$/i.test(t);
     };
 
-    // Strings
     if (typeof raw === 'string') {
       const s = raw.trim();
       if (s === '') return null;
-      // If comma-separated list, split
       const parts = s.split(',').map((x) => x.trim()).filter((x) => x.length > 0 && !isNoneToken(x));
       if (parts.length === 0) return null;
       return parts.length === 1 ? parts[0] : parts;
     }
 
-    // Arrays
     if (Array.isArray(raw)) {
       const parts = raw
         .map((x) => (x === undefined || x === null ? '' : String(x).trim()))
@@ -96,7 +90,6 @@ export default function Status() {
       return parts.length === 1 ? parts[0] : parts;
     }
 
-    // Objects - try to keep only keys with meaningful values (e.g. counts > 0)
     if (typeof raw === 'object') {
       const entries = Object.entries(raw).map(([k, v]) => [String(k).trim(), v]);
       const kept = {};
@@ -108,11 +101,9 @@ export default function Status() {
           const n = Number(v);
           if (!Number.isNaN(n) && n > 0) kept[k] = n;
           else if (!/^\d+$/.test(v) && !isNoneToken(v)) {
-            // non-numeric string (probably label), keep it
             kept[k] = v;
           }
         } else if (v) {
-          // truthy non-number => keep
           kept[k] = v;
         }
       }
@@ -120,16 +111,13 @@ export default function Status() {
       return kept;
     }
 
-    // Fallback coerce to string
     const coerced = String(raw).trim();
     return coerced.length === 0 || /^none$/i.test(coerced) || /^null$/i.test(coerced) ? null : coerced;
   }
 
-  // Normalize a full log entry into { ts, classes, arrival, raw }
   const normalizeLog = (entry) => {
     if (!entry) return null;
 
-    // If entry is a JSON string, parse and re-normalize
     if (typeof entry === 'string') {
       try {
         const parsed = JSON.parse(entry);
@@ -149,11 +137,9 @@ export default function Status() {
       return { ts, classes, arrival, raw: entry };
     }
 
-    // primitives
     return { ts: null, classes: normalizeClasses(String(entry)), arrival: null, raw: entry };
   };
 
-  // returns true if normalized log indicates at least one detection
   const hasDetections = (log) => {
     if (!log) return false;
     const cls = log.classes;
@@ -174,7 +160,6 @@ export default function Status() {
     }
   };
 
-  // Format normalized classes into readable string (or null if none)
   const formatClasses = (log) => {
     if (!log) return null;
     const cls = log.classes;
@@ -193,7 +178,7 @@ export default function Status() {
   };
 
   // ---------------------------
-  // Logs loading
+  // Logs loading (unchanged)
   // ---------------------------
   const loadLogsForDevice = async (device) => {
     const id = device.id;
@@ -289,7 +274,7 @@ export default function Status() {
     );
   };
 
-  // ---------- FIXED: Inline confirm + delete handlers ----------
+  // ---------- FIXED: Inline confirm + delete handlers (unchanged) ----------
   const startDelete = (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     setPendingDelete(deviceId);
@@ -300,11 +285,10 @@ export default function Status() {
     setPendingDelete(null);
   };
 
-  // THIS IS THE FIXED DELETE FUNCTION - PREVENTS DEVICE RECREATION
   const performDelete = async (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     console.log('[Status] performDelete called for', deviceId, { authReady });
-    
+
     if (!authReady) {
       console.warn('[Status] performDelete: auth not ready');
       alert('Not authenticated yet. Please wait a moment and try again.');
@@ -314,17 +298,10 @@ export default function Status() {
 
     setDeleting(true);
     try {
-      // STEP 1: Add device to deleted_devices list (use set() for boolean values)
-      console.log('[Status] Adding device to deleted_devices list:', deviceId);
       await set(dbRef(realtimeDB, `deleted_devices/${deviceId}`), true);
-      
-      // STEP 2: Remove device from devices collection
-      console.log('[Status] Removing device from devices collection:', deviceId);
       await remove(dbRef(realtimeDB, `devices/${deviceId}`));
-      
       console.log('[Status] Device successfully deleted and marked as deleted:', deviceId);
       alert(`Device ${deviceId} permanently removed. It will not be recreated from MQTT messages.`);
-      
     } catch (err) {
       console.error('[Status] Delete operation failed:', err);
       alert(`Failed to delete device: ${err.message}`);
@@ -334,13 +311,64 @@ export default function Status() {
     }
   };
 
+  // ---------------------------
+  // NEW: filter toggle logic + device filtering
+  // ---------------------------
+  const toggleFilter = (type) => {
+    setFilter((prev) => (prev === type ? null : type));
+    // collapse any expanded device when changing filter to avoid mismatch
+    setExpandedDevice(null);
+  };
+
+  const matchesFilter = (d) => {
+    if (!filter) return true;
+    if (filter === 'fullBin') {
+      return boolish(d.binFull) || (d.fillPct != null && Number(d.fillPct) >= 90);
+    }
+    if (filter === 'flood') {
+      return boolish(d.flooded);
+    }
+    if (filter === 'active') {
+      return boolish(d.active) || boolish(d.online);
+    }
+    return true;
+  };
+
+  // Precompute filtered list
+  const filteredDevices = devices.filter(matchesFilter);
+
   return (
     <div className={css(styles.statusContainer)}>
       <div className={css(styles.widgetGrid)}>
-        <Widget icon={<FiTrash2 />} title="Full Bin Alerts" value={`${displayValue(fullBinAlerts)} Alert${fullBinAlerts === 1 ? '' : 's'}`} />
-        <Widget icon={<FiPlusCircle />} title="Flood Risk" value={`${displayValue(floodRisks)} Alert${floodRisks === 1 ? '' : 's'}`} />
-        <Widget icon={<FiWifi />} title="Active Devices" value={`${displayValue(activeDevices)} Device${activeDevices === 1 ? '' : 's'}`} />
+        <Widget
+          icon={<FiTrash2 />}
+          title="Full Bin Alerts"
+          value={`${displayValue(fullBinAlerts)} Alert${fullBinAlerts === 1 ? '' : 's'}`}
+          onClick={() => toggleFilter('fullBin')}
+          isActive={filter === 'fullBin'}
+        />
+        <Widget
+          icon={<FiPlusCircle />}
+          title="Flood Risk"
+          value={`${displayValue(floodRisks)} Alert${floodRisks === 1 ? '' : 's'}`}
+          onClick={() => toggleFilter('flood')}
+          isActive={filter === 'flood'}
+        />
+        <Widget
+          icon={<FiWifi />}
+          title="Active Devices"
+          value={`${displayValue(activeDevices)} Device${activeDevices === 1 ? '' : 's'}`}
+          onClick={() => toggleFilter('active')}
+          isActive={filter === 'active'}
+        />
       </div>
+
+      {/* Show count of filtered devices when a filter is active */}
+      {filter && (
+        <div className={css(styles.filterInfo)}>
+          Showing {filteredDevices.length} of {devices.length} devices ({filter === 'fullBin' ? 'Full Bin' : filter === 'flood' ? 'Flood Risk' : 'Active'})
+        </div>
+      )}
 
       <div className={css(styles.deviceHealth)}>
         <h2>Device Health</h2>
@@ -356,7 +384,7 @@ export default function Status() {
             </tr>
           </thead>
           <tbody>
-            {devices.map((d) => {
+            {filteredDevices.map((d) => {
               const isDisabled = boolish(d.disabled);
               const isExpanded = expandedDevice === d.id;
               const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0
@@ -378,7 +406,7 @@ export default function Status() {
                     </td>
                     <td>{d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—'}</td>
                     <td className={css(boolish(d.flooded) ? styles.alert : styles.ok)}>{boolish(d.flooded) ? 'Yes' : 'No'}</td>
-                    <td className={css(boolish(d.binFull) ? styles.alert : styles.ok)}>  {d.fillPct != null ? `${d.fillPct}%` : '-'}</td>
+                    <td className={css(boolish(d.binFull) ? styles.alert : styles.ok)}>{d.fillPct != null ? `${d.fillPct}%` : '-'}</td>
                     <td className={css(boolish(d.active) || boolish(d.online) ? styles.ok : styles.alert)}>{boolish(d.active) || boolish(d.online) ? 'Yes' : 'No'}</td>
 
                     {/* Actions cell: stop row-level clicks and show inline confirm when needed */}
@@ -452,6 +480,12 @@ export default function Status() {
                 <td colSpan="6" className={css(styles.noData)}>No devices connected yet</td>
               </tr>
             )}
+
+            {devices.length > 0 && filteredDevices.length === 0 && (
+              <tr>
+                <td colSpan="6" className={css(styles.noData)}>No devices match the selected filter</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -471,8 +505,14 @@ export default function Status() {
 }
 
 /* Widget + styles kept same as before, plus inline-confirm styles and delete button tweak */
-const Widget = ({ icon, title, value }) => (
-  <div className={css(styles.widget)}>
+const Widget = ({ icon, title, value, onClick, isActive }) => (
+  <div
+    className={css(styles.widget, isActive ? styles.widgetActive : null)}
+    onClick={onClick}
+    role="button"
+    tabIndex={0}
+    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick && onClick(); }}
+  >
     <div className={css(styles.widgetIcon)}>{icon}</div>
     <div className={css(styles.widgetText)}>
       <p className={css(styles.widgetTitle)}>{title}</p>
@@ -492,7 +532,7 @@ const styles = StyleSheet.create({
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
     gap: '24px',
-    marginBottom: '32px',
+    marginBottom: '12px',
   },
   widget: {
     backgroundColor: '#1E293B',
@@ -503,6 +543,15 @@ const styles = StyleSheet.create({
     gap: '16px',
     boxShadow: '0 4px 10px rgba(0, 0, 0, 0.2)',
     cursor: 'pointer',
+    transition: 'transform 0.12s ease, box-shadow 0.12s ease, border 0.12s ease',
+    outline: 'none',
+    ':focus': {
+      boxShadow: '0 6px 14px rgba(0,0,0,0.25)',
+    },
+  },
+  widgetActive: {
+    border: '2px solid rgba(59,130,246,0.9)', // highlight active filter
+    transform: 'translateY(-2px)',
   },
   widgetIcon: {
     fontSize: '36px',
@@ -517,6 +566,10 @@ const styles = StyleSheet.create({
   widgetValue: {
     fontSize: '1.25rem',
     fontWeight: 'bold',
+  },
+  filterInfo: {
+    color: '#94A3B8',
+    marginBottom: '12px',
   },
   deviceHealth: {
     backgroundColor: '#1E293B',
