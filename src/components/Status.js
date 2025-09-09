@@ -16,8 +16,8 @@ export default function Status() {
   const [errorLogs, setErrorLogs] = useState({});
   const [logsMap, setLogsMap] = useState({});
 
-  // NEW: filter state: 'fullBin' | 'flood' | 'active' | null
-  const [filter, setFilter] = useState(null);
+  // NEW: allow multiple filters selected (array of types)
+  const [filters, setFilters] = useState([]); // possible values: 'fullBin', 'flood', 'active'
 
   // Inline-confirm state
   const [pendingDelete, setPendingDelete] = useState(null); // device id awaiting confirmation
@@ -59,7 +59,7 @@ export default function Status() {
   const realTimeAlerts = [];
   devices.forEach((d) => {
     if (boolish(d.binFull)) realTimeAlerts.push(`⚠️ Bin Full at Device ${d.id}`);
-    if (boolish(d.flooded)) realTimeAlerts.push(`🌊 Flood Risk Detected at Device ${d.id}`);
+    if (boolish(d.flooded)) realTimeAlerts.push(`🌊 Flood Alert Detected at Device ${d.id}`);
   });
 
   // ---------------------------
@@ -312,30 +312,45 @@ export default function Status() {
   };
 
   // ---------------------------
-  // NEW: filter toggle logic + device filtering
+  // UPDATED: multi-select filter toggle logic + device filtering
   // ---------------------------
   const toggleFilter = (type) => {
-    setFilter((prev) => (prev === type ? null : type));
-    // collapse any expanded device when changing filter to avoid mismatch
+    setFilters((prev) => {
+      if (prev.includes(type)) {
+        return prev.filter((p) => p !== type);
+      }
+      return [...prev, type];
+    });
+    // collapse any expanded device when changing filters to avoid mismatch
     setExpandedDevice(null);
   };
 
+  const clearFilters = () => {
+    setFilters([]);
+  };
+
   const matchesFilter = (d) => {
-    if (!filter) return true;
-    if (filter === 'fullBin') {
-      return boolish(d.binFull) || (d.fillPct != null && Number(d.fillPct) >= 90);
-    }
-    if (filter === 'flood') {
-      return boolish(d.flooded);
-    }
-    if (filter === 'active') {
-      return boolish(d.active) || boolish(d.online);
-    }
-    return true;
+    if (!filters || filters.length === 0) return true; // no filters => show all
+    // OR semantics: device matches if it satisfies any selected filter
+    return filters.some((f) => {
+      if (f === 'fullBin') {
+        return boolish(d.binFull) || (d.fillPct != null && Number(d.fillPct) >= 90);
+      }
+      if (f === 'flood') {
+        return boolish(d.flooded);
+      }
+      if (f === 'active') {
+        return boolish(d.active) || boolish(d.online);
+      }
+      return false;
+    });
   };
 
   // Precompute filtered list
   const filteredDevices = devices.filter(matchesFilter);
+
+  // helper to render user-friendly filter names
+  const filterLabel = (f) => (f === 'fullBin' ? 'Full Bin' : f === 'flood' ? 'Flood Alerts' : f === 'active' ? 'Active' : f);
 
   return (
     <div className={css(styles.statusContainer)}>
@@ -345,33 +360,37 @@ export default function Status() {
           title="Full Bin Alerts"
           value={`${displayValue(fullBinAlerts)} Alert${fullBinAlerts === 1 ? '' : 's'}`}
           onClick={() => toggleFilter('fullBin')}
-          isActive={filter === 'fullBin'}
+          isActive={filters.includes('fullBin')}
         />
         <Widget
           icon={<FiPlusCircle />}
-          title="Flood Risk"
+          title="Flood Alerts"
           value={`${displayValue(floodRisks)} Alert${floodRisks === 1 ? '' : 's'}`}
           onClick={() => toggleFilter('flood')}
-          isActive={filter === 'flood'}
+          isActive={filters.includes('flood')}
         />
         <Widget
           icon={<FiWifi />}
           title="Active Devices"
           value={`${displayValue(activeDevices)} Device${activeDevices === 1 ? '' : 's'}`}
           onClick={() => toggleFilter('active')}
-          isActive={filter === 'active'}
+          isActive={filters.includes('active')}
         />
       </div>
 
-      {/* Show count of filtered devices when a filter is active */}
-      {filter && (
+      {/* Show count of filtered devices when any filter is active */}
+      {filters && filters.length > 0 && (
         <div className={css(styles.filterInfo)}>
-          Showing {filteredDevices.length} of {devices.length} devices ({filter === 'fullBin' ? 'Full Bin' : filter === 'flood' ? 'Flood Risk' : 'Active'})
+          Showing {filteredDevices.length} of {devices.length} devices — Filters:
+          <span className={css(styles.filterChips)}>
+            {filters.map((f) => <span key={f} className={css(styles.filterChip)}>{filterLabel(f)}</span>)}
+          </span>
+          <button type="button" className={css(styles.clearBtn)} onClick={clearFilters}>Clear filters</button>
         </div>
       )}
 
       <div className={css(styles.deviceHealth)}>
-        <h2>Device Health</h2>
+        <h2>Device Status</h2>
         <table className={css(styles.deviceTable)}>
           <thead>
             <tr className={css(styles.tableHeader)}>
@@ -567,10 +586,37 @@ const styles = StyleSheet.create({
     fontSize: '1.25rem',
     fontWeight: 'bold',
   },
+
   filterInfo: {
     color: '#94A3B8',
     marginBottom: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
   },
+  filterChips: {
+    display: 'inline-flex',
+    gap: '8px',
+    marginLeft: '8px',
+  },
+  filterChip: {
+    backgroundColor: '#0B1220',
+    color: '#E2E8F0',
+    padding: '6px 8px',
+    borderRadius: '999px',
+    fontSize: '0.85rem',
+    border: '1px solid rgba(255,255,255,0.04)',
+  },
+  clearBtn: {
+    marginLeft: '8px',
+    background: 'transparent',
+    border: '1px solid rgba(255,255,255,0.06)',
+    color: '#94A3B8',
+    padding: '6px 10px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+  },
+
   deviceHealth: {
     backgroundColor: '#1E293B',
     padding: '24px',
