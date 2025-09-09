@@ -1,8 +1,8 @@
 // src/components/Status.jsx
-import React, { useContext, useState, useEffect, useRef } from 'react';
+import React, { useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { MetricsContext } from '../MetricsContext';
 import { realtimeDB } from '../firebase2';
-import { ref as dbRef, remove, update, set } from 'firebase/database';
+import { ref as dbRef, remove, set } from 'firebase/database';
 import { FiTrash2, FiPlusCircle, FiWifi, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import { StyleSheet, css } from 'aphrodite';
 
@@ -16,16 +16,18 @@ export default function Status() {
   const [errorLogs, setErrorLogs] = useState({});
   const [logsMap, setLogsMap] = useState({});
 
-  // NEW: allow multiple filters selected (array of types)
-  const [filters, setFilters] = useState([]); // possible values: 'fullBin', 'flood', 'active'
+  // multi-select filters
+  const [filters, setFilters] = useState([]); // 'fullBin' | 'flood' | 'active'
 
-  // Inline-confirm state
-  const [pendingDelete, setPendingDelete] = useState(null); // device id awaiting confirmation
-  const [deleting, setDeleting] = useState(false); // deletion in progress
+  // responsive
+  const [isNarrow, setIsNarrow] = useState(false);
+
+  // inline confirm
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const displayValue = (val) => (val === null || val === undefined ? 'Loading…' : val);
 
-  // defensive boolean helper: treat 'true'/'false' strings as booleans
   const boolish = (v) => {
     if (v === true) return true;
     if (v === false) return false;
@@ -38,6 +40,26 @@ export default function Status() {
     return Boolean(v);
   };
 
+  // media listener setup
+  const setupMediaListener = useCallback(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+    const mq = window.matchMedia('(max-width: 720px)');
+    const handler = (e) => setIsNarrow(Boolean(e.matches));
+    setIsNarrow(Boolean(mq.matches));
+    if (mq.addEventListener) mq.addEventListener('change', handler);
+    else if (mq.addListener) mq.addListener(handler);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', handler);
+      else if (mq.removeListener) mq.removeListener(handler);
+    };
+  }, []);
+
+  useEffect(() => {
+    const cleanup = setupMediaListener();
+    return cleanup;
+  }, [setupMediaListener]);
+
+  // reverse geocode addresses (simple caching)
   useEffect(() => {
     devices.forEach((d) => {
       if (d.lat != null && d.lon != null && !fetchedAddrs.current.has(d.id)) {
@@ -63,7 +85,7 @@ export default function Status() {
   });
 
   // ---------------------------
-  // Normalization helpers (unchanged)
+  // Normalization helpers
   // ---------------------------
   function normalizeClasses(raw) {
     if (raw === undefined || raw === null) return null;
@@ -117,18 +139,14 @@ export default function Status() {
 
   const normalizeLog = (entry) => {
     if (!entry) return null;
-
     if (typeof entry === 'string') {
       try {
         const parsed = JSON.parse(entry);
-        if (parsed && typeof parsed === 'object') {
-          return normalizeLog(parsed);
-        }
+        if (parsed && typeof parsed === 'object') return normalizeLog(parsed);
       } catch (e) {
-        // not JSON -> treat as primitive below
+        // not JSON
       }
     }
-
     if (typeof entry === 'object') {
       const ts = entry.ts ?? entry.time ?? entry.timestamp ?? null;
       const rawClasses = entry.classes ?? entry.detected ?? entry.items ?? entry.labels ?? null;
@@ -136,7 +154,6 @@ export default function Status() {
       const arrival = entry.arrival ?? null;
       return { ts, classes, arrival, raw: entry };
     }
-
     return { ts: null, classes: normalizeClasses(String(entry)), arrival: null, raw: entry };
   };
 
@@ -150,14 +167,8 @@ export default function Status() {
       if (s === '' || s === 'none' || s === 'null') return false;
       return true;
     }
-    if (typeof cls === 'object') {
-      return Object.keys(cls).length > 0;
-    }
-    try {
-      return String(cls).trim() !== '';
-    } catch (e) {
-      return false;
-    }
+    if (typeof cls === 'object') return Object.keys(cls).length > 0;
+    try { return String(cls).trim() !== ''; } catch (e) { return false; }
   };
 
   const formatClasses = (log) => {
@@ -178,7 +189,7 @@ export default function Status() {
   };
 
   // ---------------------------
-  // Logs loading (unchanged)
+  // Logs loading
   // ---------------------------
   const loadLogsForDevice = async (device) => {
     const id = device.id;
@@ -243,11 +254,7 @@ export default function Status() {
       const arrivalMs = (log && log.arrival) || (device && device.lastSeen) || Date.now();
       const estDate = new Date(arrivalMs);
       const uptimeStr = formatUptime(info.uptimeMs);
-      try {
-        return `${estDate.toLocaleString()} (${uptimeStr})`;
-      } catch (e) {
-        return `${estDate.toString()} (${uptimeStr})`;
-      }
+      try { return `${estDate.toLocaleString()} (${uptimeStr})`; } catch (e) { return `${estDate.toString()} (${uptimeStr})`; }
     }
     return '—';
   };
@@ -274,7 +281,7 @@ export default function Status() {
     );
   };
 
-  // ---------- FIXED: Inline confirm + delete handlers (unchanged) ----------
+  // delete handlers
   const startDelete = (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     setPendingDelete(deviceId);
@@ -287,20 +294,15 @@ export default function Status() {
 
   const performDelete = async (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-    console.log('[Status] performDelete called for', deviceId, { authReady });
-
     if (!authReady) {
-      console.warn('[Status] performDelete: auth not ready');
       alert('Not authenticated yet. Please wait a moment and try again.');
       setPendingDelete(null);
       return;
     }
-
     setDeleting(true);
     try {
       await set(dbRef(realtimeDB, `deleted_devices/${deviceId}`), true);
       await remove(dbRef(realtimeDB, `devices/${deviceId}`));
-      console.log('[Status] Device successfully deleted and marked as deleted:', deviceId);
       alert(`Device ${deviceId} permanently removed. It will not be recreated from MQTT messages.`);
     } catch (err) {
       console.error('[Status] Delete operation failed:', err);
@@ -311,47 +313,91 @@ export default function Status() {
     }
   };
 
-  // ---------------------------
-  // UPDATED: multi-select filter toggle logic + device filtering
-  // ---------------------------
+  // multi-select filters
   const toggleFilter = (type) => {
     setFilters((prev) => {
-      if (prev.includes(type)) {
-        return prev.filter((p) => p !== type);
-      }
+      if (prev.includes(type)) return prev.filter((p) => p !== type);
       return [...prev, type];
     });
-    // collapse any expanded device when changing filters to avoid mismatch
     setExpandedDevice(null);
   };
 
-  const clearFilters = () => {
-    setFilters([]);
-  };
+  const clearFilters = () => setFilters([]);
 
   const matchesFilter = (d) => {
-    if (!filters || filters.length === 0) return true; // no filters => show all
-    // OR semantics: device matches if it satisfies any selected filter
+    if (!filters || filters.length === 0) return true;
     return filters.some((f) => {
-      if (f === 'fullBin') {
-        return boolish(d.binFull) || (d.fillPct != null && Number(d.fillPct) >= 90);
-      }
-      if (f === 'flood') {
-        return boolish(d.flooded);
-      }
-      if (f === 'active') {
-        return boolish(d.active) || boolish(d.online);
-      }
+      if (f === 'fullBin') return boolish(d.binFull) || (d.fillPct != null && Number(d.fillPct) >= 90);
+      if (f === 'flood') return boolish(d.flooded);
+      if (f === 'active') return boolish(d.active) || boolish(d.online);
       return false;
     });
   };
 
-  // Precompute filtered list
   const filteredDevices = devices.filter(matchesFilter);
-
-  // helper to render user-friendly filter names
   const filterLabel = (f) => (f === 'fullBin' ? 'Full Bin' : f === 'flood' ? 'Flood Alerts' : f === 'active' ? 'Active' : f);
 
+  // Device card for mobile/narrow screens
+  const DeviceCard = ({ d }) => {
+    const isDisabled = boolish(d.disabled);
+    const addr = d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—';
+    const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0 ? d.logs.map(normalizeLog).filter(Boolean) : (logsMap[d.id] || []);
+
+    return (
+      <div className={css(styles.deviceCard)}>
+        <div className={css(styles.cardHeader)}>
+          <div className={css(styles.cardTitle)}>
+            <strong>{d.id}</strong>
+            {isDisabled && <span className={css(styles.disabledBadge)}>Disabled</span>}
+          </div>
+          <div className={css(styles.cardActions)}>
+            {pendingDelete === d.id ? (
+              <div className={css(styles.inlineConfirm)}>
+                <span>Confirm?</span>
+                <button type="button" className={css(styles.confirmBtn)} onClick={(e) => performDelete(e, d.id)} disabled={deleting}>{deleting ? 'Deleting…' : 'Yes'}</button>
+                <button type="button" className={css(styles.cancelBtn)} onClick={(e) => cancelDelete(e)} disabled={deleting}>No</button>
+              </div>
+            ) : (
+              <button type="button" className={css(styles.deleteBtn)} onClick={(e) => startDelete(e, d.id)} disabled={!authReady || deleting} title={!authReady ? 'Waiting for auth...' : `Delete device ${d.id}`}>
+                <FiTrash2 />
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className={css(styles.cardBody)}>
+          <div><strong>Address:</strong> {addr}</div>
+          <div><strong>Flooded:</strong> <span className={css(boolish(d.flooded) ? styles.alert : styles.ok)}>{boolish(d.flooded) ? 'Yes' : 'No'}</span></div>
+          <div><strong>Bin Fill:</strong> {d.fillPct != null ? `${d.fillPct}%` : '-'}</div>
+          <div><strong>Active:</strong> <span className={css(boolish(d.active) || boolish(d.online) ? styles.ok : styles.alert)}>{boolish(d.active) || boolish(d.online) ? 'Yes' : 'No'}</span></div>
+        </div>
+
+        <div className={css(styles.cardFooter)}>
+          <button type="button" className={css(styles.expandSmallBtn)} onClick={() => onToggleDevice(d)} aria-expanded={expandedDevice === d.id}>
+            {expandedDevice === d.id ? 'Hide Logs' : 'Show Logs'}
+          </button>
+        </div>
+
+        {expandedDevice === d.id && (
+          <div className={css(styles.logsListMobile)}>
+            {loadingLogs[d.id] ? (
+              <div className={css(styles.loading)}>Loading logs…</div>
+            ) : errorLogs[d.id] ? (
+              <div className={css(styles.error)}>Error: {errorLogs[d.id]}</div>
+            ) : deviceLogs.length > 0 ? (
+              deviceLogs.map((l, i) => renderLogItem(l, i, d))
+            ) : (
+              <div className={css(styles.noLogs)}>No logs available</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ---------------------------
+  // Render
+  // ---------------------------
   return (
     <div className={css(styles.statusContainer)}>
       <div className={css(styles.widgetGrid)}>
@@ -378,7 +424,6 @@ export default function Status() {
         />
       </div>
 
-      {/* Show count of filtered devices when any filter is active */}
       {filters && filters.length > 0 && (
         <div className={css(styles.filterInfo)}>
           Showing {filteredDevices.length} of {devices.length} devices — Filters:
@@ -391,122 +436,110 @@ export default function Status() {
 
       <div className={css(styles.deviceHealth)}>
         <h2>Device Status</h2>
-        <table className={css(styles.deviceTable)}>
-          <thead>
-            <tr className={css(styles.tableHeader)}>
-              <th>Device ID</th>
-              <th>Street Address</th>
-              <th>Flooded</th>
-              <th>Bin Full</th>
-              <th>Active</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredDevices.map((d) => {
-              const isDisabled = boolish(d.disabled);
-              const isExpanded = expandedDevice === d.id;
-              const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0
-                ? d.logs.map(normalizeLog).filter(Boolean)
-                : (logsMap[d.id] || []);
 
-              return (
-                <React.Fragment key={d.id}>
-                  <tr
-                    className={css(styles.deviceRow, isDisabled ? styles.disabledRow : null)}
-                    onClick={() => onToggleDevice(d)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onToggleDevice(d); }}
-                  >
-                    <td className={css(styles.deviceIdCell)}>
-                      <span className={css(styles.expandIcon)}>{isExpanded ? <FiChevronUp /> : <FiChevronDown />}</span>
-                      {d.id} {isDisabled && <span className={css(styles.disabledBadge)}>Disabled</span>}
-                    </td>
-                    <td>{d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—'}</td>
-                    <td className={css(boolish(d.flooded) ? styles.alert : styles.ok)}>{boolish(d.flooded) ? 'Yes' : 'No'}</td>
-                    <td className={css(boolish(d.binFull) ? styles.alert : styles.ok)}>{d.fillPct != null ? `${d.fillPct}%` : '-'}</td>
-                    <td className={css(boolish(d.active) || boolish(d.online) ? styles.ok : styles.alert)}>{boolish(d.active) || boolish(d.online) ? 'Yes' : 'No'}</td>
+        {isNarrow ? (
+          <div className={css(styles.deviceCardList)}>
+            {filteredDevices.length === 0 ? (
+              <div className={css(styles.noData)}>No devices match the selected filter</div>
+            ) : (
+              filteredDevices.map((d) => <DeviceCard key={d.id} d={d} />)
+            )}
+          </div>
+        ) : (
+          <div className={css(styles.responsiveTableWrapper)}>
+            <table className={css(styles.deviceTable)}>
+              <thead>
+                <tr className={css(styles.tableHeader)}>
+                  <th>Device ID</th>
+                  <th>Street Address</th>
+                  <th>Flooded</th>
+                  <th>Bin Full</th>
+                  <th>Active</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDevices.map((d) => {
+                  const isDisabled = boolish(d.disabled);
+                  const isExpanded = expandedDevice === d.id;
+                  const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0 ? d.logs.map(normalizeLog).filter(Boolean) : (logsMap[d.id] || []);
 
-                    {/* Actions cell: stop row-level clicks and show inline confirm when needed */}
-                    <td onClick={(e) => e.stopPropagation()}>
-                      {pendingDelete === d.id ? (
-                        <div className={css(styles.inlineConfirm)}>
-                          <span>Confirm delete?</span>
-                          <button
-                            type="button"
-                            className={css(styles.confirmBtn)}
-                            onClick={(e) => performDelete(e, d.id)}
-                            disabled={deleting}
-                          >
-                            {deleting ? 'Deleting…' : 'Yes'}
-                          </button>
-                          <button
-                            type="button"
-                            className={css(styles.cancelBtn)}
-                            onClick={(e) => cancelDelete(e)}
-                            disabled={deleting}
-                          >
-                            No
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className={css(styles.deleteBtn)}
-                          onClick={(e) => startDelete(e, d.id)}
-                          disabled={!authReady || deleting}
-                          aria-disabled={!authReady || deleting}
-                          title={!authReady ? 'Waiting for auth...' : `Delete device ${d.id}`}
-                          data-test-delete={`delete-${d.id}`}
-                        >
-                          <FiTrash2 />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                  return (
+                    <React.Fragment key={d.id}>
+                      <tr
+                        className={css(styles.deviceRow, isDisabled ? styles.disabledRow : null)}
+                        onClick={() => onToggleDevice(d)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onToggleDevice(d); }}
+                      >
+                        <td className={css(styles.deviceIdCell)}>
+                          <span className={css(styles.expandIcon)}>{isExpanded ? <FiChevronUp /> : <FiChevronDown />}</span>
+                          {d.id} {isDisabled && <span className={css(styles.disabledBadge)}>Disabled</span>}
+                        </td>
+                        <td>{d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—'}</td>
+                        <td className={css(boolish(d.flooded) ? styles.alert : styles.ok)}>{boolish(d.flooded) ? 'Yes' : 'No'}</td>
+                        <td className={css(boolish(d.binFull) ? styles.alert : styles.ok)}>{d.fillPct != null ? `${d.fillPct}%` : '-'}</td>
+                        <td className={css(boolish(d.active) || boolish(d.online) ? styles.ok : styles.alert)}>{boolish(d.active) || boolish(d.online) ? 'Yes' : 'No'}</td>
 
-                  {isExpanded && (
-                    <tr className={css(styles.expandedRow)}>
-                      <td colSpan="6">
-                        <div className={css(styles.expandedPanel)}>
-                          <div className={css(styles.panelHeader)}>
-                            <strong>Detection Logs</strong>
-                            <span className={css(styles.panelSub)}>Device {d.id}</span>
-                          </div>
-
-                          {loadingLogs[d.id] ? (
-                            <div className={css(styles.loading)}>Loading logs…</div>
-                          ) : errorLogs[d.id] ? (
-                            <div className={css(styles.error)}>Error: {errorLogs[d.id]}</div>
-                          ) : deviceLogs.length > 0 ? (
-                            <div className={css(styles.logsList)}>
-                              {deviceLogs.map((l, i) => renderLogItem(l, i, d))}
+                        <td onClick={(e) => e.stopPropagation()}>
+                          {pendingDelete === d.id ? (
+                            <div className={css(styles.inlineConfirm)}>
+                              <span>Confirm delete?</span>
+                              <button type="button" className={css(styles.confirmBtn)} onClick={(e) => performDelete(e, d.id)} disabled={deleting}>{deleting ? 'Deleting…' : 'Yes'}</button>
+                              <button type="button" className={css(styles.cancelBtn)} onClick={(e) => cancelDelete(e)} disabled={deleting}>No</button>
                             </div>
                           ) : (
-                            <div className={css(styles.noLogs)}>No logs available</div>
+                            <button type="button" className={css(styles.deleteBtn)} onClick={(e) => startDelete(e, d.id)} disabled={!authReady || deleting} aria-disabled={!authReady || deleting} title={!authReady ? 'Waiting for auth...' : `Delete device ${d.id}`} data-test-delete={`delete-${d.id}`}>
+                              <FiTrash2 />
+                            </button>
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              );
-            })}
+                        </td>
+                      </tr>
 
-            {devices.length === 0 && (
-              <tr>
-                <td colSpan="6" className={css(styles.noData)}>No devices connected yet</td>
-              </tr>
-            )}
+                      {isExpanded && (
+                        <tr className={css(styles.expandedRow)}>
+                          <td colSpan="6">
+                            <div className={css(styles.expandedPanel)}>
+                              <div className={css(styles.panelHeader)}>
+                                <strong>Detection Logs</strong>
+                                <span className={css(styles.panelSub)}>Device {d.id}</span>
+                              </div>
 
-            {devices.length > 0 && filteredDevices.length === 0 && (
-              <tr>
-                <td colSpan="6" className={css(styles.noData)}>No devices match the selected filter</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                              {loadingLogs[d.id] ? (
+                                <div className={css(styles.loading)}>Loading logs…</div>
+                              ) : errorLogs[d.id] ? (
+                                <div className={css(styles.error)}>Error: {errorLogs[d.id]}</div>
+                              ) : deviceLogs.length > 0 ? (
+                                <div className={css(styles.logsList)}>
+                                  {deviceLogs.map((l, i) => renderLogItem(l, i, d))}
+                                </div>
+                              ) : (
+                                <div className={css(styles.noLogs)}>No logs available</div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+
+                {devices.length === 0 && (
+                  <tr>
+                    <td colSpan="6" className={css(styles.noData)}>No devices connected yet</td>
+                  </tr>
+                )}
+
+                {devices.length > 0 && filteredDevices.length === 0 && (
+                  <tr>
+                    <td colSpan="6" className={css(styles.noData)}>No devices match the selected filter</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className={css(styles.realTimeAlerts)}>
@@ -523,7 +556,7 @@ export default function Status() {
   );
 }
 
-/* Widget + styles kept same as before, plus inline-confirm styles and delete button tweak */
+/* Widget + styles */
 const Widget = ({ icon, title, value, onClick, isActive }) => (
   <div
     className={css(styles.widget, isActive ? styles.widgetActive : null)}
@@ -549,9 +582,12 @@ const styles = StyleSheet.create({
   },
   widgetGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-    gap: '24px',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+    gap: '16px',
     marginBottom: '12px',
+    '@media (max-width: 420px)': {
+      gridTemplateColumns: '1fr',
+    },
   },
   widget: {
     backgroundColor: '#1E293B',
@@ -569,7 +605,7 @@ const styles = StyleSheet.create({
     },
   },
   widgetActive: {
-    border: '2px solid rgba(59,130,246,0.9)', // highlight active filter
+    border: '2px solid rgba(59,130,246,0.9)',
     transform: 'translateY(-2px)',
   },
   widgetIcon: {
@@ -593,12 +629,9 @@ const styles = StyleSheet.create({
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
+    flexWrap: 'wrap',
   },
-  filterChips: {
-    display: 'inline-flex',
-    gap: '8px',
-    marginLeft: '8px',
-  },
+  filterChips: { display: 'inline-flex', gap: '8px', marginLeft: '8px' },
   filterChip: {
     backgroundColor: '#0B1220',
     color: '#E2E8F0',
@@ -624,175 +657,51 @@ const styles = StyleSheet.create({
     boxShadow: '0 2px 6px rgba(0, 0, 0, 0.2)',
     marginBottom: '32px',
   },
-  deviceTable: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    marginTop: '12px',
-    marginBottom: '12px',
-    color: '#F8FAFC',
-    fontSize: '0.9rem',
-    tableLayout: 'fixed',
-  },
-  tableHeader: {
-    color: '#94A3B8',
-    fontWeight: '600',
-    fontSize: '1rem',
-    textTransform: 'uppercase',
-    padding: '12px',
-    textAlign: 'left',
-  },
-  deviceRow: {
-    cursor: 'pointer',
-    ':hover': {
-      backgroundColor: '#111827',
-    },
-  },
-  disabledRow: {
-    opacity: 0.5,
-  },
-  deviceIdCell: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  expandIcon: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: '8px',
-    color: '#94A3B8',
-  },
-  disabledBadge: {
-    marginLeft: '8px',
-    backgroundColor: '#374151',
-    color: '#E5E7EB',
-    padding: '2px 6px',
-    borderRadius: '6px',
-    fontSize: '0.75rem',
-  },
-  deleteBtn: {
-    position: 'relative',
-    zIndex: 10,
-    background: 'transparent',
-    border: 'none',
-    cursor: 'pointer',
-    padding: '6px',
-    color: '#F87171',
-    ':disabled': {
-      opacity: 0.4,
-      cursor: 'not-allowed',
-    },
-  },
-
-  /* inline confirm */
-  inlineConfirm: {
-    display: 'flex',
-    gap: '8px',
-    alignItems: 'center',
-  },
-  confirmBtn: {
-    background: '#dc2626',
-    color: '#fff',
-    border: 'none',
-    padding: '6px 8px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-  },
-  cancelBtn: {
-    background: '#374151',
-    color: '#fff',
-    border: 'none',
-    padding: '6px 8px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-  },
-
-  alert: {
-    color: '#EF4444',
-    fontWeight: 'bold',
-  },
-  ok: {
-    color: '#10B981',
-    fontWeight: 'bold',
-  },
-  noData: {
-    color: '#94A3B8',
-    textAlign: 'center',
-    padding: '16px',
-  },
-  realTimeAlerts: {
-    backgroundColor: '#1E293B',
-    padding: '24px',
-    borderRadius: '12px',
-    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.2)',
-  },
-  alertsList: {
-    listStyleType: 'none',
-    paddingLeft: '0',
-    marginTop: '12px',
-    fontSize: '0.95rem',
-    lineHeight: '1.6',
-    color: '#E2E8F0',
-  },
-
-  /* expanded panel */
-  expandedRow: {
-    backgroundColor: 'transparent',
-  },
-  expandedPanel: {
-    padding: '12px',
+  responsiveTableWrapper: { overflowX: 'auto', paddingBottom: '8px' },
+  deviceCardList: { display: 'flex', flexDirection: 'column', gap: '12px' },
+  deviceCard: {
     backgroundColor: '#0B1220',
-    borderRadius: '8px',
-    marginTop: '8px',
-  },
-  panelHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: '8px',
-    color: '#E6EEF8',
-  },
-  panelSub: {
-    color: '#94A3B8',
-    fontSize: '0.85rem',
-    marginLeft: '8px',
-  },
-  logsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    maxHeight: '240px',
-    overflowY: 'auto',
-    paddingRight: '8px',
-  },
-  logItem: {
-    display: 'grid',
-    gridTemplateColumns: '180px 1fr',
-    gap: '12px',
-    alignItems: 'start',
-    padding: '10px',
-    borderRadius: '6px',
-    backgroundColor: '#0F172A',
+    borderRadius: '10px',
+    padding: '12px',
     border: '1px solid rgba(255,255,255,0.03)',
   },
-  logTimestamp: {
-    color: '#94A3B8',
-    fontSize: '0.85rem',
-  },
-  logClasses: {
-    color: '#E2E8F0',
-    fontSize: '0.95rem',
-  },
-  loading: {
-    color: '#94A3B8',
-    padding: '12px',
-  },
-  error: {
-    color: '#F97316',
-    padding: '12px',
-  },
-  noLogs: {
-    color: '#94A3B8',
-    padding: '12px',
-  },
+  cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
+  cardTitle: { fontSize: '1rem', display: 'flex', gap: '8px', alignItems: 'center' },
+  cardActions: { display: 'flex', gap: '8px', alignItems: 'center' },
+  cardBody: { display: 'grid', gap: '6px', fontSize: '0.95rem' },
+  cardFooter: { marginTop: '8px', display: 'flex', gap: '8px', alignItems: 'center' },
+  expandSmallBtn: { background: 'transparent', border: '1px solid rgba(255,255,255,0.06)', padding: '6px 10px', borderRadius: '8px', color: '#E2E8F0', cursor: 'pointer' },
+  logsListMobile: { marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '200px', overflowY: 'auto', paddingRight: '6px' },
+
+  deviceTable: { width: '100%', borderCollapse: 'collapse', marginTop: '12px', marginBottom: '12px', color: '#F8FAFC', fontSize: '0.9rem', tableLayout: 'fixed' },
+  tableHeader: { color: '#94A3B8', fontWeight: '600', fontSize: '1rem', textTransform: 'uppercase', padding: '12px', textAlign: 'left' },
+  deviceRow: { cursor: 'pointer', ':hover': { backgroundColor: '#111827' } },
+  disabledRow: { opacity: 0.5 },
+  deviceIdCell: { display: 'flex', alignItems: 'center', gap: '8px' },
+  expandIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginRight: '8px', color: '#94A3B8' },
+  disabledBadge: { marginLeft: '8px', backgroundColor: '#374151', color: '#E5E7EB', padding: '2px 6px', borderRadius: '6px', fontSize: '0.75rem' },
+
+  deleteBtn: { position: 'relative', zIndex: 10, background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', color: '#F87171', ':disabled': { opacity: 0.4, cursor: 'not-allowed' } },
+  inlineConfirm: { display: 'flex', gap: '8px', alignItems: 'center' },
+  confirmBtn: { background: '#dc2626', color: '#fff', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer' },
+  cancelBtn: { background: '#374151', color: '#fff', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer' },
+
+  alert: { color: '#EF4444', fontWeight: 'bold' },
+  ok: { color: '#10B981', fontWeight: 'bold' },
+  noData: { color: '#94A3B8', textAlign: 'center', padding: '16px' },
+
+  realTimeAlerts: { backgroundColor: '#1E293B', padding: '24px', borderRadius: '12px', boxShadow: '0 2px 6px rgba(0, 0, 0, 0.2)' },
+  alertsList: { listStyleType: 'none', paddingLeft: '0', marginTop: '12px', fontSize: '0.95rem', lineHeight: '1.6', color: '#E2E8F0' },
+
+  expandedRow: { backgroundColor: 'transparent' },
+  expandedPanel: { padding: '12px', backgroundColor: '#0B1220', borderRadius: '8px', marginTop: '8px' },
+  panelHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px', color: '#E6EEF8' },
+  panelSub: { color: '#94A3B8', fontSize: '0.85rem', marginLeft: '8px' },
+  logsList: { display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '240px', overflowY: 'auto', paddingRight: '8px' },
+  logItem: { display: 'grid', gridTemplateColumns: '180px 1fr', gap: '12px', alignItems: 'start', padding: '10px', borderRadius: '6px', backgroundColor: '#0F172A', border: '1px solid rgba(255,255,255,0.03)' },
+  logTimestamp: { color: '#94A3B8', fontSize: '0.85rem' },
+  logClasses: { color: '#E2E8F0', fontSize: '0.95rem' },
+  loading: { color: '#94A3B8', padding: '12px' },
+  error: { color: '#F97316', padding: '12px' },
+  noLogs: { color: '#94A3B8', padding: '12px' },
 });
