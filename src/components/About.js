@@ -1,6 +1,14 @@
-import React from 'react';
+import React from 'react'; 
 
 const About = () => {
+  const developers = [
+    { name: "Dhafny Buenafe", course: "BS Computer Engineering", desc: "Specializes in Intelligent System.", img: "dev1.jpg" },
+    { name: "Patrick Jordan Cabanatan", course: "BS Computer Engineering", desc: "Specializes in Systems Administration", img: "dev2.jpg" },
+    { name: "Jethro Duque", course: "BS Computer Engineering", desc: "Specializes in Railway Engineering.", img: "dev3.jpg" },
+    { name: "Rens Españo", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "dev4.jpg" },
+    { name: "Justin Jello Repani", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "dev5.jpg" },
+  ];
+
   return (
     <div style={styles.container}>
       <div style={styles.header}>About the Debris Detection System</div>
@@ -16,6 +24,54 @@ const About = () => {
       <p style={styles.lastDescription}>
         We are testing and evaluating the system’s accuracy to ensure reliability and performance in real-world conditions.
       </p>
+
+      {/* Developers Section */}
+      <div style={styles.sectionHeader}>Meet the Developers</div>
+      <div style={styles.devGrid}>
+        {developers.slice(0, 4).map((dev, index) => (
+          <div key={index} style={styles.devCard} className="dev-card">
+            <img src={dev.img} alt={dev.name} style={styles.devImg} className="dev-img" />
+            <h3 style={styles.devName}>{dev.name}</h3>
+            <p style={styles.devCourse}>{dev.course}</p>
+            <p style={styles.devDesc}>{dev.desc}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Fifth developer centered below */}
+      <div style={styles.devCenter}>
+        <div style={styles.devCard} className="dev-card">
+          <img src={developers[4].img} alt={developers[4].name} style={styles.devImg} className="dev-img" />
+          <h3 style={styles.devName}>{developers[4].name}</h3>
+          <p style={styles.devCourse}>{developers[4].course}</p>
+          <p style={styles.devDesc}>{developers[4].desc}</p>
+        </div>
+      </div>
+
+      {/* Prototype Section */}
+      <div style={styles.sectionHeader}>Prototype</div>
+      <div style={styles.prototypeContainer}>
+        <img src="prototype.jpg" alt="Prototype" style={styles.prototypeImg} />
+      </div>
+
+      {/* Extra CSS for hover effects */}
+      <style>
+        {`
+          .dev-card {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+          }
+          .dev-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+          }
+          .dev-img {
+            transition: transform 0.3s ease;
+          }
+          .dev-card:hover .dev-img {
+            transform: scale(1.05);
+          }
+        `}
+      </style>
     </div>
   );
 };
@@ -23,41 +79,97 @@ const About = () => {
 const styles = {
   container: {
     backgroundColor: '#ffffff',
-    width: '80%',
-    maxWidth: '900px',
+    width: '85%',
+    maxWidth: '1100px',
     margin: '50px auto',
-    padding: '40px',
-    borderRadius: '8px',
-    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+    padding: '50px',
+    borderRadius: '12px',
+    boxShadow: '0 6px 15px rgba(0, 0, 0, 0.1)',
     textAlign: 'center',
+    fontFamily: 'Arial, sans-serif',
   },
   header: {
-    fontSize: '2.2rem',
+    fontSize: '2.4rem',
     color: '#2c3e50',
-    marginBottom: '20px',
-    fontWeight: '600',
+    marginBottom: '25px',
+    fontWeight: '700',
   },
   description: {
-    fontSize: '1.1rem',
-    lineHeight: '1.8',
-    color: '#7f8c8d',
-    marginBottom: '20px',
+    fontSize: '1.15rem',
+    lineHeight: '1.9',
+    color: '#555',
+    marginBottom: '18px',
     textAlign: 'justify',
   },
   lastDescription: {
-    marginBottom: '0',
+    marginBottom: '50px',
   },
-  '@media (max-width: 768px)': {
-    container: {
-      width: '90%',
-      padding: '30px',
-    },
-    header: {
-      fontSize: '1.8rem',
-    },
-    description: {
-      fontSize: '1rem',
-    },
+  sectionHeader: {
+    fontSize: '2rem',
+    color: '#2c3e50',
+    marginTop: '50px',
+    marginBottom: '30px',
+    fontWeight: '700',
+    borderBottom: '2px solid #ddd',
+    display: 'inline-block',
+    paddingBottom: '5px',
+  },
+  devGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: '30px',
+    justifyItems: 'center', // centers each card horizontally
+    marginBottom: '30px',
+  },
+  devCenter: {
+    display: 'flex',
+    justifyContent: 'center',
+    marginBottom: '50px',
+  },
+  devCard: {
+    backgroundColor: '#fdfdfd',
+    padding: '25px',
+    borderRadius: '12px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+    textAlign: 'center',
+    width: '100%',
+    maxWidth: '280px',
+  },
+  devImg: {
+    width: '100%',
+    height: '220px',
+    objectFit: 'cover',
+    borderRadius: '10px',
+    marginBottom: '15px',
+  },
+  devName: {
+    fontSize: '1.3rem',
+    fontWeight: '600',
+    marginBottom: '6px',
+    color: '#2c3e50',
+  },
+  devCourse: {
+    fontSize: '1rem',
+    fontWeight: '500',
+    color: '#444',
+    marginBottom: '10px',
+  },
+  devDesc: {
+    fontSize: '0.95rem',
+    color: '#666',
+    lineHeight: '1.5',
+  },
+  prototypeContainer: {
+    display: 'flex',
+    justifyContent: 'center',
+    marginTop: '20px',
+  },
+  prototypeImg: {
+    width: '100%',
+    maxWidth: '650px',
+    height: 'auto',
+    borderRadius: '12px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
   },
 };
 
