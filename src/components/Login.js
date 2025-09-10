@@ -18,12 +18,7 @@ const Login = ({ onLogin }) => {
   return (
     <div className={css(styles.loginContainer)}>
       <form onSubmit={handleSubmit} className={css(styles.loginForm)}>
-        {/* Logo at the top */}
-        <div className={css(styles.logoContainer)}>
-          <img src="/EcotrackLogo.png" alt="EcoTrack Logo" className={css(styles.logo)} />
-        </div>
-
-        <h2 className={css(styles.title)}>EcoTrack Login</h2>
+        <h2 className={css(styles.title)}>Login</h2>
 
         <input
           className={css(styles.input)}
@@ -67,14 +62,6 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: '400px',
     boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
-  },
-  logoContainer: {
-    marginBottom: '20px', // a bit more spacing under the logo
-  },
-  logo: {
-    width: '250px',   // bigger logo
-    height: '250px',   // keeps aspect ratio
-    objectFit: 'contain',
   },
   title: {
     color: 'white',
