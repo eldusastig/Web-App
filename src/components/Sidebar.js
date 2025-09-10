@@ -146,8 +146,8 @@ const styles = {
     gap: "8px",
   },
   logo: {
-    width: "28px",
-    height: "28px",
+    width: "40px",
+    height: "40px",
     objectFit: "contain",
   },
   brand: {
