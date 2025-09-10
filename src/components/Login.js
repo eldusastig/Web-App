@@ -17,29 +17,33 @@ const Login = ({ onLogin }) => {
 
   return (
     <div className={css(styles.loginContainer)}>
-      <form onSubmit={handleSubmit} className={css(styles.loginForm)}>
-        {/* Logo inside the container */}
-        <img src="/EcotrackLogo.png" alt="EcoTrack Logo" className={css(styles.logo)} />
+      <div className={css(styles.loginBox)}>
+        {/* Logo sa gilid (left side) */}
+        <div className={css(styles.logoSection)}>
+          <img src="/EcotrackLogo.png" alt="EcoTrack Logo" className={css(styles.logo)} />
+        </div>
 
-        <h2 className={css(styles.title)}>Login</h2>
-
-        <input
-          className={css(styles.input)}
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-        />
-        <input
-          className={css(styles.input)}
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        {error && <p className={css(styles.error)}>{error}</p>}
-        <button className={css(styles.button)} type="submit">Login</button>
-      </form>
+        {/* Login Form sa kanan */}
+        <form onSubmit={handleSubmit} className={css(styles.loginForm)}>
+          <h2 className={css(styles.title)}>Login</h2>
+          <input
+            className={css(styles.input)}
+            type="text"
+            placeholder="Username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
+          <input
+            className={css(styles.input)}
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          {error && <p className={css(styles.error)}>{error}</p>}
+          <button className={css(styles.button)} type="submit">Login</button>
+        </form>
+      </div>
     </div>
   );
 };
@@ -55,21 +59,35 @@ const styles = StyleSheet.create({
     padding: '0 10px',
     boxSizing: 'border-box',
   },
-  loginForm: {
-    backgroundColor: '#1E293B',
-    padding: '40px',
-    borderRadius: '12px',
+  loginBox: {
     display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    width: '100%',
-    maxWidth: '400px',
+    flexDirection: 'row', // side by side layout
+    backgroundColor: '#1E293B',
+    borderRadius: '12px',
     boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
+    overflow: 'hidden',
+    maxWidth: '700px',
+    width: '100%',
+  },
+  logoSection: {
+    backgroundColor: '#0F1B34',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '40px',
+    flex: 1, // kalahati ng box
   },
   logo: {
-    width: '300px',
-    height: '150',
+    width: '180px',
+    height: 'auto',
     objectFit: 'contain',
+  },
+  loginForm: {
+    flex: 1, // kalahati ng box
+    padding: '50px',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
   },
   title: {
     color: 'white',
