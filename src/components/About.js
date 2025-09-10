@@ -19,7 +19,7 @@ const About = () => {
       {/* About Section */}
       <div style={styles.header}>About the Debris Detection System</div>
       <p style={styles.description}>
-        This system is designed to detect and remove debris from sewer drainage inlets, aiming to improve sewer maintenance and prevent urban flooding.
+        This system is designed to detect and remove debris from drainage inlets, aiming to improve sewer maintenance and prevent urban flooding.
       </p>
       <p style={styles.description}>
         The prototype monitors grate-type drainage inlets, sends alerts when the collecting bin is full, detects signs of flooding, and identifies the system’s location for easy tracking.
