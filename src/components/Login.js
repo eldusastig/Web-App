@@ -70,7 +70,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   logoSection: {
-    backgroundColor: '#0F1B34',
+    backgroundColor: '#0000000',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
