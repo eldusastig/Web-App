@@ -48,8 +48,8 @@ const Login = ({ onLogin }) => {
 
 const styles = StyleSheet.create({
   loginContainer: {
-    height: '100vh',
-    width: '100vw',
+    height: '500vh',
+    width: '500vw',
     backgroundColor: '#0F1B34',
     display: 'flex',
     justifyContent: 'center',
