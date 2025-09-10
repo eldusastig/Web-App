@@ -322,6 +322,7 @@ const styles = {
     padding: '20px',
     backgroundColor: '#fff',
     borderRadius: '8px',
+    marginLeft: '10px',
     boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
   },
   header: {
