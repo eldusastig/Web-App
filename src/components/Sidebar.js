@@ -17,17 +17,15 @@ const EXPANDED_WIDTH = 250;
 const Sidebar = ({ onLogout }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  // keep CSS var in sync so other components can use it for layout
+
   useEffect(() => {
     const widthPx = isCollapsed ? `${COLLAPSED_WIDTH}px` : `${EXPANDED_WIDTH}px`;
-    // set a CSS custom property on the root element
     document.documentElement.style.setProperty('--sidebar-width', widthPx);
 
-    // also set a fallback for older code that might read --sidebar-left (optional)
+
     document.documentElement.style.setProperty('--sidebar-left', '0px');
 
     return () => {
-      // optional: on unmount revert to default (250px) — adjust as needed
       document.documentElement.style.removeProperty('--sidebar-width');
       document.documentElement.style.removeProperty('--sidebar-left');
     };
@@ -95,16 +93,16 @@ const MenuItem = ({ icon, label, to, onClick, isCollapsed }) => {
 const styles = {
   // Fixed, full-height sidebar that includes padding in height to avoid overflow.
   sidebar: {
-    position: 'fixed',        // remove from page flow so it won't change page height
+    position: 'fixed',        
     top: 0,
     left: 0,
     height: "100vh",
-    boxSizing: "border-box",  // INCLUDE padding inside the 100vh — prevents overflow
+    boxSizing: "border-box", 
     backgroundColor: "#1F2937",
     color: "white",
     padding: "20px 10px",
     transition: "width 0.3s ease",
-    overflowY: "auto",        // allow vertical scroll inside sidebar if needed
+    overflowY: "auto",       
     zIndex: 1000,
   },
   header: {
