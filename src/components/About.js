@@ -2,8 +2,8 @@ import React from 'react';
 
 const About = () => {
   const developers = [
-    { name: "Dhafny Buenafe", course: "BS Computer Engineering", desc: "Specializes in Intelligent System.", img: "dev1.jpg" },
-    { name: "Patrick Jordan Cabanatan", course: "BS Computer Engineering", desc: "Specializes in Systems Administration", img: "dev2.jpg" },
+    { name: "Dhafny Buenafe", course: "BS Computer Engineering", desc: "Specializes in Intelligent Systems.", img: "dev1.jpg" },
+    { name: "Patrick Jordan Cabanatan", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "dev2.jpg" },
     { name: "Jethro Duque", course: "BS Computer Engineering", desc: "Specializes in Railway Engineering.", img: "dev3.jpg" },
     { name: "Rens Españo", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "dev4.jpg" },
     { name: "Justin Jello Repani", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "dev5.jpg" },
@@ -11,6 +11,12 @@ const About = () => {
 
   return (
     <div style={styles.container}>
+      {/* Centered image before the About header */}
+      <div style={styles.topImageContainer}>
+        <img src="banner.jpg" alt="Debris Detection System" style={styles.topImage} />
+      </div>
+
+      {/* About Section */}
       <div style={styles.header}>About the Debris Detection System</div>
       <p style={styles.description}>
         This system is designed to detect and remove debris from sewer drainage inlets, aiming to improve sewer maintenance and prevent urban flooding.
@@ -88,6 +94,18 @@ const styles = {
     textAlign: 'center',
     fontFamily: 'Arial, sans-serif',
   },
+  topImageContainer: {
+    display: 'flex',
+    justifyContent: 'center',
+    marginBottom: '30px',
+  },
+  topImage: {
+    width: '100%',
+    maxWidth: '700px',
+    height: 'auto',
+    borderRadius: '12px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+  },
   header: {
     fontSize: '2.4rem',
     color: '#2c3e50',
@@ -118,7 +136,7 @@ const styles = {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, 1fr)',
     gap: '30px',
-    justifyItems: 'center', // centers each card horizontally
+    justifyItems: 'center',
     marginBottom: '30px',
   },
   devCenter: {
