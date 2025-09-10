@@ -19,6 +19,12 @@ const Login = ({ onLogin }) => {
     <div className={css(styles.loginContainer)}>
       <form onSubmit={handleSubmit} className={css(styles.loginForm)}>
         <h2 className={css(styles.title)}>EcoTrack Login</h2>
+
+        {/* Logo under the title */}
+        <div className={css(styles.logoContainer)}>
+          <img src="/EcotrackLogo.png" alt="EcoTrack Logo" className={css(styles.logo)} />
+        </div>
+
         <input
           className={css(styles.input)}
           type="text"
@@ -42,13 +48,13 @@ const Login = ({ onLogin }) => {
 
 const styles = StyleSheet.create({
   loginContainer: {
-    height: '100vh', 
-    width: '100vw',  
-    backgroundColor: '#0F1B34', 
+    height: '100vh',
+    width: '100vw',
+    backgroundColor: '#0F1B34',
     display: 'flex',
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    padding: '0 10px', 
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: '0 10px',
     boxSizing: 'border-box',
   },
   loginForm: {
@@ -57,15 +63,24 @@ const styles = StyleSheet.create({
     borderRadius: '12px',
     display: 'flex',
     flexDirection: 'column',
-    width: '100%', 
-    maxWidth: '400px', 
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: '400px',
     boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
   },
   title: {
     color: 'white',
-    marginBottom: '20px',
+    marginBottom: '10px',
     textAlign: 'center',
     fontSize: '2rem',
+  },
+  logoContainer: {
+    marginBottom: '20px',
+  },
+  logo: {
+    width: '80px',
+    height: '80px',
+    objectFit: 'contain',
   },
   input: {
     marginBottom: '16px',
@@ -73,6 +88,7 @@ const styles = StyleSheet.create({
     borderRadius: '6px',
     border: 'none',
     fontSize: '1rem',
+    width: '100%',
   },
   button: {
     padding: '10px',
