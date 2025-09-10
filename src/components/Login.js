@@ -72,7 +72,7 @@ const styles = StyleSheet.create({
     marginBottom: '20px', // a bit more spacing under the logo
   },
   logo: {
-    width: '150px',   // bigger logo
+    width: '300px',   // bigger logo
     height: 'auto',   // keeps aspect ratio
     objectFit: 'contain',
   },
