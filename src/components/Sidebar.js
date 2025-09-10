@@ -43,7 +43,7 @@ const Sidebar = ({ onLogout }) => {
     >
       {/* Header */}
       <div style={styles.header}>
-        {!isCollapsed && <span style={styles.brand}>EcoTrack Dashboard</span>}
+        {!isCollapsed && <span style={styles.brand}>Dashboard</span>}
         <button
           style={styles.toggleBtn}
           onClick={toggleSidebar}
