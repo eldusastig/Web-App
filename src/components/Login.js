@@ -18,12 +18,10 @@ const Login = ({ onLogin }) => {
   return (
     <div className={css(styles.loginContainer)}>
       <div className={css(styles.loginBox)}>
-        {/* Logo sa gilid (left side) */}
         <div className={css(styles.logoSection)}>
           <img src="/EcotrackLogo.png" alt="EcoTrack Logo" className={css(styles.logo)} />
         </div>
 
-        {/* Login Form sa kanan */}
         <form onSubmit={handleSubmit} className={css(styles.loginForm)}>
           <h2 className={css(styles.title)}>Login</h2>
           <input
@@ -78,7 +76,7 @@ const styles = StyleSheet.create({
     flex: 1, 
   },
   logo: {
-    width: '180px',
+    width: '250px',
     height: 'auto',
     objectFit: 'contain',
   },
