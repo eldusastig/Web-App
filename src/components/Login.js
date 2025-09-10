@@ -70,12 +70,12 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   logoSection: {
-    backgroundColor: '#0000000',
+    backgroundColor: '#FFFFFF',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     padding: '40px',
-    flex: 1, // kalahati ng box
+    flex: 1, 
   },
   logo: {
     width: '180px',
@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
     objectFit: 'contain',
   },
   loginForm: {
-    flex: 1, // kalahati ng box
+    flex: 1, 
     padding: '50px',
     display: 'flex',
     flexDirection: 'column',
