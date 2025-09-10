@@ -48,8 +48,8 @@ const Login = ({ onLogin }) => {
 
 const styles = StyleSheet.create({
   loginContainer: {
-    height: '500vh',
-    width: '500vw',
+    height: '100vh',
+    width: '100vw',
     backgroundColor: '#0F1B34',
     display: 'flex',
     justifyContent: 'center',
@@ -69,11 +69,11 @@ const styles = StyleSheet.create({
     boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
   },
   logoContainer: {
-    marginBottom: '15px',
+    marginBottom: '20px', // a bit more spacing under the logo
   },
   logo: {
-    width: '80px',
-    height: '80px',
+    width: '150px',   // bigger logo
+    height: 'auto',   // keeps aspect ratio
     objectFit: 'contain',
   },
   title: {
