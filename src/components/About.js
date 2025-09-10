@@ -4,7 +4,7 @@ const About = () => {
   const developers = [
     { name: "Dhafny Buenafe", course: "BS Computer Engineering", desc: "Specializes in Intelligent Systems.", img: "Buenafe.png" },
     { name: "Patrick Jordan Cabanatan", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Cabanatan.png" },
-    { name: "Jethro Duque", course: "BS Computer Engineering", desc: "Specializes in Railway Engineering.", img: "Duque.png" },
+    { name: "Jethro Duque", course: "BS Computer Engineering", desc: "Specializes in Railway Engineering.", img: "Duque.jpg" },
     { name: "Rens Españo", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Espano.png" },
     { name: "Justin Jello Repani", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Repani.png" },
   ];
@@ -13,7 +13,7 @@ const About = () => {
     <div style={styles.container}>
       {/* Centered image before the About header */}
       <div style={styles.topImageContainer}>
-        <img src="EcotrackLogo.jpg" alt="Debris Detection System" style={styles.topImage} />
+        <img src="EcotrackLogo.png" alt="Debris Detection System" style={styles.topImage} />
       </div>
 
       {/* About Section */}
@@ -57,7 +57,7 @@ const About = () => {
       {/* Prototype Section */}
       <div style={styles.sectionHeader}>Prototype</div>
       <div style={styles.prototypeContainer}>
-        <img src="Ecotrack.jpg" alt="Prototype" style={styles.prototypeImg} />
+        <img src="Ecotrack2.jpg" alt="Prototype" style={styles.prototypeImg} />
       </div>
 
       {/* Extra CSS for hover effects */}
