@@ -13,7 +13,7 @@ const About = () => {
     <div style={styles.container}>
       {/* Centered image before the About header */}
       <div style={styles.topImageContainer}>
-        <img src="banner.jpg" alt="Debris Detection System" style={styles.topImage} />
+        <img src="Ecotrack1.jpg" alt="Debris Detection System" style={styles.topImage} />
       </div>
 
       {/* About Section */}
