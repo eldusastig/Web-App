@@ -17,17 +17,14 @@ const EXPANDED_WIDTH = 250;
 const Sidebar = ({ onLogout }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-
   useEffect(() => {
     const widthPx = isCollapsed ? `${COLLAPSED_WIDTH}px` : `${EXPANDED_WIDTH}px`;
-    document.documentElement.style.setProperty('--sidebar-width', widthPx);
-
-
-    document.documentElement.style.setProperty('--sidebar-left', '0px');
+    document.documentElement.style.setProperty("--sidebar-width", widthPx);
+    document.documentElement.style.setProperty("--sidebar-left", "0px");
 
     return () => {
-      document.documentElement.style.removeProperty('--sidebar-width');
-      document.documentElement.style.removeProperty('--sidebar-left');
+      document.documentElement.style.removeProperty("--sidebar-width");
+      document.documentElement.style.removeProperty("--sidebar-left");
     };
   }, [isCollapsed]);
 
@@ -43,12 +40,15 @@ const Sidebar = ({ onLogout }) => {
     >
       {/* Header */}
       <div style={styles.header}>
-        {!isCollapsed && <span style={styles.brand}>Dashboard</span>}
+        <div style={styles.brandContainer}>
+          <img src="/EcotrackLogo.png" alt="Logo" style={styles.logo} />
+          {!isCollapsed && <span style={styles.brand}>Dashboard</span>}
+        </div>
         <button
           style={styles.toggleBtn}
           onClick={toggleSidebar}
-          aria-label={isCollapsed ? 'Open sidebar' : 'Collapse sidebar'}
-          title={isCollapsed ? 'Open' : 'Collapse'}
+          aria-label={isCollapsed ? "Open sidebar" : "Collapse sidebar"}
+          title={isCollapsed ? "Open" : "Collapse"}
         >
           {isCollapsed ? <FiMenu /> : <FiChevronLeft />}
         </button>
@@ -56,11 +56,36 @@ const Sidebar = ({ onLogout }) => {
 
       {/* Navigation */}
       <nav aria-label="Main navigation">
-        <MenuItem icon={<FiHome />} label="Home" to="/" isCollapsed={isCollapsed} />
-        <MenuItem icon={<FiMapPin />} label="Locations" to="/locations" isCollapsed={isCollapsed} />
-        <MenuItem icon={<FiActivity />} label="Status" to="/status" isCollapsed={isCollapsed} />
-        <MenuItem icon={<FiInfo />} label="About" to="/about" isCollapsed={isCollapsed} />
-        <MenuItem icon={<FiLogOut />} label="Logout" onClick={onLogout} isCollapsed={isCollapsed} />
+        <MenuItem
+          icon={<FiHome />}
+          label="Home"
+          to="/"
+          isCollapsed={isCollapsed}
+        />
+        <MenuItem
+          icon={<FiMapPin />}
+          label="Locations"
+          to="/locations"
+          isCollapsed={isCollapsed}
+        />
+        <MenuItem
+          icon={<FiActivity />}
+          label="Status"
+          to="/status"
+          isCollapsed={isCollapsed}
+        />
+        <MenuItem
+          icon={<FiInfo />}
+          label="About"
+          to="/about"
+          isCollapsed={isCollapsed}
+        />
+        <MenuItem
+          icon={<FiLogOut />}
+          label="Logout"
+          onClick={onLogout}
+          isCollapsed={isCollapsed}
+        />
       </nav>
     </aside>
   );
@@ -91,18 +116,18 @@ const MenuItem = ({ icon, label, to, onClick, isCollapsed }) => {
 };
 
 const styles = {
-  // Fixed, full-height sidebar that includes padding in height to avoid overflow.
+  // Sidebar container
   sidebar: {
-    position: 'fixed',        
+    position: "fixed",
     top: 0,
     left: 0,
     height: "100vh",
-    boxSizing: "border-box", 
+    boxSizing: "border-box",
     backgroundColor: "#1F2937",
     color: "white",
     padding: "20px 10px",
     transition: "width 0.3s ease",
-    overflowY: "auto",       
+    overflowY: "auto",
     zIndex: 1000,
   },
   header: {
@@ -112,12 +137,22 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: '8px',
+    gap: "8px",
+  },
+  brandContainer: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
+  logo: {
+    width: "28px",
+    height: "28px",
+    objectFit: "contain",
   },
   brand: {
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
   },
   toggleBtn: {
     background: "none",
@@ -126,9 +161,9 @@ const styles = {
     fontSize: "1.2rem",
     cursor: "pointer",
     marginLeft: "10px",
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
     padding: 6,
   },
   menuItem: {
@@ -150,7 +185,7 @@ const styles = {
   icon: {
     marginRight: "10px",
     fontSize: "1.2rem",
-    display: 'inline-flex',
+    display: "inline-flex",
   },
 };
 
