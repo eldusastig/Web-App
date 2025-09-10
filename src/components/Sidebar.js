@@ -173,6 +173,7 @@ const styles = {
     padding: "10px 8px",
     cursor: "pointer",
     borderRadius: "6px",
+    marginLeft: "10px"
     marginBottom: "8px",
     transition: "background-color 0.15s ease",
   },
