@@ -40,10 +40,12 @@ const Sidebar = ({ onLogout }) => {
     >
       {/* Header */}
       <div style={styles.header}>
-        <div style={styles.brandContainer}>
-          <img src="/EcotrackLogo.png" alt="Logo" style={styles.logo} />
-          {!isCollapsed && <span style={styles.brand}>Dashboard</span>}
-        </div>
+        {!isCollapsed && (
+          <div style={styles.brandContainer}>
+            <img src="/EcotrackLogo.png" alt="Logo" style={styles.logo} />
+            <span style={styles.brand}>Dashboard</span>
+          </div>
+        )}
         <button
           style={styles.toggleBtn}
           onClick={toggleSidebar}
@@ -116,7 +118,6 @@ const MenuItem = ({ icon, label, to, onClick, isCollapsed }) => {
 };
 
 const styles = {
-  // Sidebar container
   sidebar: {
     position: "fixed",
     top: 0,
