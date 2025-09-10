@@ -18,6 +18,9 @@ const Login = ({ onLogin }) => {
   return (
     <div className={css(styles.loginContainer)}>
       <form onSubmit={handleSubmit} className={css(styles.loginForm)}>
+        {/* Logo inside the container */}
+        <img src="/EcotrackLogo.png" alt="EcoTrack Logo" className={css(styles.logo)} />
+
         <h2 className={css(styles.title)}>Login</h2>
 
         <input
@@ -54,7 +57,7 @@ const styles = StyleSheet.create({
   },
   loginForm: {
     backgroundColor: '#1E293B',
-    padding: '50px',
+    padding: '40px',
     borderRadius: '12px',
     display: 'flex',
     flexDirection: 'column',
@@ -62,6 +65,12 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: '400px',
     boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
+  },
+  logo: {
+    width: '120px',
+    height: 'auto',
+    objectFit: 'contain',
+    marginBottom: '15px',
   },
   title: {
     color: 'white',
