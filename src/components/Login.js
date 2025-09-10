@@ -67,10 +67,10 @@ const styles = StyleSheet.create({
     boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
   },
   logo: {
-    width: '150px',
-    height: 'auto',
+    width: '300px',
+    height: '200',
     objectFit: 'contain',
-    marginBottom: '15px',
+    marginBottom: '5px',
   },
   title: {
     color: 'white',
