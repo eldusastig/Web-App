@@ -86,7 +86,7 @@ const styles = {
   container: {
     backgroundColor: '#ffffff',
     width: '85%',
-    maxWidth: '1100px',
+    maxWidth: '1200px',
     margin: '20px auto',
     padding: '50px',
     borderRadius: '12px',
