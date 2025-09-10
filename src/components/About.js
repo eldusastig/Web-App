@@ -101,7 +101,7 @@ const styles = {
   },
   topImage: {
     width: '100%',
-    maxWidth: '700px',
+    maxWidth: '300px',
     height: 'auto',
     borderRadius: '12px',
     boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
