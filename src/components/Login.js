@@ -68,9 +68,8 @@ const styles = StyleSheet.create({
   },
   logo: {
     width: '300px',
-    height: '200',
+    height: '150',
     objectFit: 'contain',
-    marginBottom: '5px',
   },
   title: {
     color: 'white',
