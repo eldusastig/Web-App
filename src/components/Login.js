@@ -67,7 +67,7 @@ const styles = StyleSheet.create({
     boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
   },
   logo: {
-    width: '120px',
+    width: '150px',
     height: 'auto',
     objectFit: 'contain',
     marginBottom: '15px',
