@@ -43,44 +43,58 @@ export const MetricsProvider = ({ children }) => {
     'bin_full_flag',
   ];
 
-  function normalizePayloadBooleans(p) {
-    if (!p || typeof p !== 'object') return p;
-    const out = { ...p };
-    for (const k of KNOWN_BOOL_KEYS) {
-      if (Object.prototype.hasOwnProperty.call(out, k)) {
-        const v = out[k];
-        if (typeof v === 'boolean') continue;
-        if (typeof v === 'number') { out[k] = (v !== 0); continue; }
-        if (typeof v === 'string') {
-          const low = v.trim().toLowerCase();
-          if (low === 'true' || low === '"true"' || low === '1') out[k] = true;
-          else if (low === 'false' || low === '"false"' || low === '0') out[k] = false;
-        }
-      }
-    }
-    return out;
+  // helper: clamp to 0..100 and keep one decimal precision
+  function clampPct(n) {
+    if (typeof n !== 'number' || !isFinite(n)) return null;
+    const clamped = Math.max(0, Math.min(100, n));
+    return Math.round(clamped * 10) / 10; // one decimal place
   }
 
-  // parseFillPct: only returns an explicit numeric fill percentage from MQTT payload
-  // — do NOT infer from boolean binFull flags. This ensures we use the MQTT-provided
-  // percentage directly when present.
+  // parseFillPct: robust extractor that prefers an explicit numeric percentage
+  // - accepts number (int/float), string with optional % or quotes, and checks nested payload.data
+  // - DOES NOT infer false->0, but will return 100 if binFull boolean is true (useful fallback)
   function parseFillPct(payload) {
     if (!payload || typeof payload !== 'object') return null;
-    const candidates = ['fillPct', 'fill_pct', 'binFillPct', 'bin_fill_pct', 'fill'];
-    for (const k of candidates) {
-      if (Object.prototype.hasOwnProperty.call(payload, k)) {
-        const v = payload[k];
-        if (v === null || v === undefined) continue;
-        if (typeof v === 'number' && isFinite(v)) {
-          return Math.max(0, Math.min(100, Math.round(v)));
-        }
-        if (typeof v === 'string') {
-          const num = Number(v.trim());
-          if (!Number.isNaN(num)) return Math.max(0, Math.min(100, Math.round(num)));
-        }
+    const candidates = ['fillPct', 'fill_pct', 'binFillPct', 'bin_fill_pct', 'fill', 'level', 'fillPercentage', 'fill_percentage'];
+
+    const findIn = (obj) => {
+      for (const k of candidates) {
+        if (Object.prototype.hasOwnProperty.call(obj, k)) return obj[k];
       }
+      return undefined;
+    };
+
+    // 1) direct keys
+    let raw = findIn(payload);
+    // 2) nested .data object (common device pattern)
+    if (raw === undefined && payload.data && typeof payload.data === 'object') raw = findIn(payload.data);
+
+    if (raw === undefined || raw === null) {
+      // Fallback: if device explicitly reports binFull:true but no numeric, treat it as 100%
+      if (Object.prototype.hasOwnProperty.call(payload, 'binFull') || Object.prototype.hasOwnProperty.call(payload, 'bin_full')) {
+        const bf = payload.binFull ?? payload.bin_full;
+        if (bf === true) return 100.0; // explicit full
+        return null; // don't infer false->0 (avoid false positives)
+      }
+      return null;
     }
-    return null; // do not infer from binFull boolean — rely on explicit percentage only
+
+    // If it's already numeric
+    if (typeof raw === 'number' && isFinite(raw)) return clampPct(raw);
+
+    // If it's a boolean (should be rare here), treat true -> 100, false -> null
+    if (typeof raw === 'boolean') return raw ? 100.0 : null;
+
+    // If it's a string, strip quotes and percentage signs, then parse
+    if (typeof raw === 'string') {
+      const cleaned = raw.trim().replace(/^["']+|["']+$|%/g, '').trim();
+      if (cleaned.length === 0) return null;
+      const num = Number(cleaned);
+      if (!Number.isNaN(num) && isFinite(num)) return clampPct(num);
+      return null;
+    }
+
+    return null;
   }
 
   // ---------------------------
@@ -131,7 +145,11 @@ export const MetricsProvider = ({ children }) => {
   const pushDeviceLog = (deviceId, logObj) => {
     const idStr = String(deviceId);
     const pct = parseFillPct(logObj);
-    if (pct != null) logObj.fillPct = pct;
+    if (pct != null) {
+      // store as a numeric (one decimal) under both fillPct and fill_pct for compatibility
+      logObj.fillPct = pct;
+      logObj.fill_pct = pct;
+    }
 
     // Ensure arrival timestamp
     if (logObj.arrival === undefined || logObj.arrival === null) logObj.arrival = Date.now();
@@ -150,7 +168,7 @@ export const MetricsProvider = ({ children }) => {
         logs: [logObj],
         lastSeen: Date.now(),
         online: true,
-        binFillPct: (pct != null) ? pct : null,
+        binFillPct: pct ?? null,
       });
 
       // mark presence and active devices
