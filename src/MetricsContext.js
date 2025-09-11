@@ -1,8 +1,8 @@
-// src/MetricsContext.js
+// File: src/MetricsContext.js
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 import { realtimeDB } from './firebase2';
-import { ref, onValue, update, get } from 'firebase/database';
+import { ref as dbRef, get } from 'firebase/database';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 
 export const MetricsContext = createContext({
@@ -20,14 +20,17 @@ export const MetricsProvider = ({ children }) => {
   const [devices, setDevices]             = useState([]);
   const [authReady, setAuthReady]         = useState(false);
 
+  // deviceLogs holds normalized raw log objects (MQTT authoritative)
+  const [deviceLogs, setDeviceLogs] = useState({}); // { [id]: [ logObj, ... ] }
+
   const clientRef = useRef(null);
   const presenceRef = useRef(new Map()); // Map<id, { online: boolean, lastSeen: number }>
-
-  const dbIdsRef = useRef(new Set());
+  const dbIdsRef = useRef(new Set()); // locally-known device ids (MQTT-driven)
 
   const ACTIVE_CUTOFF_MS = 8000;
   const PRUNE_INTERVAL_MS = 2000;
-  const MAX_LOGS_PER_DEVICE = 50;
+  const MAX_LOGS_PER_DEVICE = 50; // used when building devices[].logs
+  const MAX_LOGS_PERSIST = 200;   // how many logs to keep in deviceLogs map
   const BIN_FULL_ALERT_PCT = 90;
 
   const KNOWN_BOOL_KEYS = [
@@ -82,6 +85,9 @@ export const MetricsProvider = ({ children }) => {
     return null;
   }
 
+  // ---------------------------
+  // Auth (kept - used for Status delete flow)
+  // ---------------------------
   useEffect(() => {
     const auth = getAuth();
     signInAnonymously(auth).catch((err) => console.error('Auth error:', err));
@@ -95,71 +101,66 @@ export const MetricsProvider = ({ children }) => {
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (!authReady) return;
+  // ---------------------------
+  // Helper: add a new local device (MQTT-created)
+  // ---------------------------
+  const addLocalDevice = (id, initial = {}) => {
+    const sid = String(id);
+    if (dbIdsRef.current.has(sid)) return;
+    dbIdsRef.current.add(sid);
 
-    console.log('🏁 mounting devices listener (firebase authoritative)');
-    const devicesRef = ref(realtimeDB, 'devices');
+    const newDev = {
+      id: sid,
+      createdAt: Date.now(),
+      lastSeen: initial.lastSeen ?? Date.now(),
+      online: initial.online ?? true,
+      logs: Array.isArray(initial.logs) ? initial.logs.slice(0, MAX_LOGS_PER_DEVICE) : [],
+      binFillPct: initial.binFillPct ?? (initial.binFull === true ? 100 : null),
+      binFull: (typeof initial.binFillPct === 'number') ? (initial.binFillPct >= BIN_FULL_ALERT_PCT) : (initial.binFull === true ?? false),
+      ...initial,
+    };
 
-    const unsubDevices = onValue(devicesRef, (snap) => {
-      const data = snap.val() || {};
-      const arr = Object.entries(data).map(([id, vals]) => ({ id, ...vals }));
+    setDevices((prev) => [newDev, ...prev]);
+  };
 
-      const dbIds = new Set(arr.map(d => String(d.id)));
-      dbIdsRef.current = dbIds;
+  // ---------------------------
+  // pushDeviceLog: now works fully locally (creates device if not present)
+  // ---------------------------
+  const pushDeviceLog = (deviceId, logObj) => {
+    const idStr = String(deviceId);
+    const pct = parseFillPct(logObj);
+    if (pct != null) logObj.fillPct = pct;
 
-      const merged = arr.map(d => {
-        const id = String(d.id);
-        const p = presenceRef.current.get(id);
+    // Ensure arrival timestamp
+    if (logObj.arrival === undefined || logObj.arrival === null) logObj.arrival = Date.now();
 
-        let logsArr = [];
-        if (Array.isArray(d.logs)) {
-          logsArr = d.logs.slice(0, MAX_LOGS_PER_DEVICE).filter(Boolean);
-        } else if (d.logs && typeof d.logs === 'object') {
-          logsArr = Object.entries(d.logs).map(([pushKey, val]) => {
-            if (val && typeof val === 'object') return { _key: pushKey, ...val };
-            return { _key: pushKey, raw: val };
-          });
-          logsArr.sort((a, b) => {
-            const aTs = Number(a.arrivalServerTs ?? a.arrival ?? a.ts ?? 0);
-            const bTs = Number(b.arrivalServerTs ?? b.arrival ?? b.ts ?? 0);
-            return bTs - aTs;
-          });
-          logsArr = logsArr.slice(0, MAX_LOGS_PER_DEVICE);
-        } else {
-          logsArr = [];
-        }
-
-        const dbFillPct = parseFillPct(d);
-
-        return {
-          ...d,
-          id,
-          online: p ? p.online : (d.online || false),
-          lastSeen: p ? p.lastSeen : (d.lastSeen || null),
-          logs: logsArr,
-          binFillPct: dbFillPct ?? (d.binFull === true ? 100 : null),
-          binFull: (dbFillPct != null ? dbFillPct >= BIN_FULL_ALERT_PCT : (d.binFull === true)),
-        };
-      });
-
-      setDevices(merged);
+    // 1) update deviceLogs map (MQTT authoritative)
+    setDeviceLogs((prev) => {
+      const cur = Array.isArray(prev[idStr]) ? prev[idStr].slice() : [];
+      cur.unshift(logObj);
+      if (cur.length > MAX_LOGS_PERSIST) cur.length = MAX_LOGS_PERSIST;
+      return { ...prev, [idStr]: cur };
     });
 
-    return () => unsubDevices();
-  }, [authReady]);
+    // 2) If device unknown locally, create it (MQTT-driven, no firebase write)
+    if (!dbIdsRef.current.has(idStr)) {
+      addLocalDevice(idStr, {
+        logs: [logObj],
+        lastSeen: Date.now(),
+        online: true,
+        binFillPct: pct ?? null,
+        binFull: (pct != null) ? (pct >= BIN_FULL_ALERT_PCT) : false,
+      });
 
-  const pushDeviceLog = (deviceId, logObj) => {
-    if (!dbIdsRef.current.has(String(deviceId))) {
+      // mark presence and active devices
+      presenceRef.current.set(idStr, { online: true, lastSeen: Date.now() });
+      setActiveDevices(Array.from(presenceRef.current.values()).filter(p => p.online).length);
       return;
     }
 
-    const pct = parseFillPct(logObj);
-
-    if (pct != null) logObj.fillPct = pct;
-
+    // 3) existing device: update devices[] state (shallow merge)
     setDevices((prev) => {
-      const idx = prev.findIndex((d) => String(d.id) === String(deviceId));
+      const idx = prev.findIndex((d) => String(d.id) === idStr);
       if (idx > -1) {
         const updated = [...prev];
         const prevLogs = Array.isArray(updated[idx].logs) ? updated[idx].logs : [];
@@ -173,10 +174,14 @@ export const MetricsProvider = ({ children }) => {
         };
         return updated;
       }
-      return [{ id: String(deviceId), logs: [logObj], lastSeen: Date.now(), online: true, binFillPct: pct ?? null, binFull: (pct != null) ? (pct >= BIN_FULL_ALERT_PCT) : false }, ...prev];
+      // fallback: unknown in array even though dbIdsRef says known
+      return [{ id: idStr, logs: [logObj], lastSeen: Date.now(), online: true, binFillPct: pct ?? null, binFull: (pct != null) ? (pct >= BIN_FULL_ALERT_PCT) : false }, ...prev];
     });
   };
 
+  // ---------------------------
+  // MQTT connection (MQTT is now the single source for devices/presence)
+  // ---------------------------
   useEffect(() => {
     if (!authReady) return;
     if (clientRef.current) return;
@@ -223,93 +228,71 @@ export const MetricsProvider = ({ children }) => {
 
       const parts = topic.split('/');
       const id = (payload && (payload.id ?? parts[1])) || parts[1]; // Device ID extraction
+      const idStr = String(id);
 
-      // Handle detection messages with deleted device check
+      // Helper to mark presence and activeDevices
+      const markPresence = (deviceId) => {
+        const now = Date.now();
+        presenceRef.current.set(String(deviceId), { online: true, lastSeen: now });
+        setActiveDevices(Array.from(presenceRef.current.values()).filter(p => p.online).length);
+      };
+
+      // Handle detection topic specially
       if (parts.length >= 4 && parts[0] === 'esp32' && parts[2] === 'sensor' && parts[3] === 'detections') {
-        if (!dbIdsRef.current.has(String(id))) {
-          // Check if device is deleted before auto-creating
-          const deletedRef = ref(realtimeDB, `deleted_devices/${id}`);
+        if (!dbIdsRef.current.has(idStr)) {
+          const deletedRef = dbRef(realtimeDB, `deleted_devices/${idStr}`);
           get(deletedRef).then((snap) => {
             if (snap.exists() && snap.val()) {
-              console.log(`Device ${id} is deleted, ignoring MQTT message`);
+              console.log(`Device ${idStr} is marked deleted — ignoring MQTT message`);
               return;
             }
-            
-            console.warn(`New device detected: ${id}. Auto-creating in Firebase...`);
-            update(ref(realtimeDB, `devices/${id}`), {
-              createdAt: Date.now(),
-              lastSeen: Date.now(),
-              online: true,
-              autoCreated: true
-            })
-            .then(() => {
-              dbIdsRef.current.add(String(id));
-              // Process the message after device creation
-              const logObj = payload ? { ...payload } : { raw: txt, ts: Date.now() };
-              if (logObj.ts === undefined || logObj.ts === null) logObj.ts = Date.now();
-              logObj.arrival = Date.now();
-              
-              pushDeviceLog(id, logObj);
-              
-              const now = Date.now();
-              presenceRef.current.set(String(id), { online: true, lastSeen: now });
-              setActiveDevices(Array.from(presenceRef.current.values()).filter(p => p.online).length);
-            })
-            .catch((e) => {
-              console.error('Failed to auto-create device', e);
-            });
+
+            console.warn(`New device detected via MQTT: ${idStr}. Creating locally (MQTT authoritative).`);
+            addLocalDevice(idStr, { online: true, lastSeen: Date.now() });
+
+            const logObj = payload ? { ...payload } : { raw: txt, ts: Date.now() };
+            if (logObj.ts === undefined || logObj.ts === null) logObj.ts = Date.now();
+            logObj.arrival = Date.now();
+
+            pushDeviceLog(idStr, logObj);
+            markPresence(idStr);
           }).catch((e) => {
             console.error('Failed to check deleted_devices', e);
           });
         } else {
-          // Device exists in DB, process normally
           const logObj = payload ? { ...payload } : { raw: txt, ts: Date.now() };
           if (logObj.ts === undefined || logObj.ts === null) logObj.ts = Date.now();
           logObj.arrival = Date.now();
-          
-          pushDeviceLog(id, logObj);
-          
-          const now = Date.now();
-          presenceRef.current.set(String(id), { online: true, lastSeen: now });
-          setActiveDevices(Array.from(presenceRef.current.values()).filter(p => p.online).length);
+
+          pushDeviceLog(idStr, logObj);
+          markPresence(idStr);
         }
-        
-        // Update lastDetection in Firebase for existing devices
-        if (dbIdsRef.current.has(String(id))) {
-          const logObj = payload ? { ...payload } : { raw: txt, ts: Date.now() };
-          if (logObj.ts === undefined || logObj.ts === null) logObj.ts = Date.now();
-          
-          try {
-            update(ref(realtimeDB, `devices/${id}/lastDetection`), {
-              topClass: logObj.topClass ?? null,
-              ts: logObj.ts ?? logObj.arrival,
-            }).catch((err) => console.warn('Firebase update failed for lastDetection', err));
-          } catch (e) {
-            console.warn('Firebase update exception', e);
-          }
-        }
-        
+
         return;
       }
 
-      // Handle non-detection messages (status, sensors, etc.)
+      // Non-detection messages (status, sensors, etc.)
       const logObj = payload ? { ...payload } : { raw: txt, ts: Date.now() };
       if (logObj.ts === undefined || logObj.ts === null) logObj.ts = Date.now();
       logObj.arrival = Date.now();
 
-      pushDeviceLog(id, logObj);
+      if (!dbIdsRef.current.has(idStr)) {
+        const deletedRef = dbRef(realtimeDB, `deleted_devices/${idStr}`);
+        get(deletedRef).then((snap) => {
+          if (snap.exists() && snap.val()) {
+            console.log(`Device ${idStr} is marked deleted — ignoring MQTT message`);
+            return;
+          }
 
-      const now = Date.now();
-      presenceRef.current.set(String(id), { online: true, lastSeen: now });
-      setActiveDevices(Array.from(presenceRef.current.values()).filter(p => p.online).length);
-
-      try {
-        update(ref(realtimeDB, `devices/${id}/lastDetection`), {
-          topClass: logObj.topClass ?? null,
-          ts: logObj.ts ?? logObj.arrival,
-        }).catch((err) => console.warn('Firebase update failed for lastDetection', err));
-      } catch (e) {
-        console.warn('Firebase update exception', e);
+          addLocalDevice(idStr, { online: true, lastSeen: Date.now() });
+          pushDeviceLog(idStr, logObj);
+          markPresence(idStr);
+        }).catch((e) => {
+          console.error('Failed to check deleted_devices', e);
+        });
+      } else {
+        pushDeviceLog(idStr, logObj);
+        markPresence(idStr);
       }
     });
 
@@ -321,6 +304,9 @@ export const MetricsProvider = ({ children }) => {
     };
   }, [authReady]);
 
+  // ---------------------------
+  // Prune presence periodically
+  // ---------------------------
   useEffect(() => {
     const interval = setInterval(() => {
       const cutoff = Date.now() - ACTIVE_CUTOFF_MS;
@@ -354,6 +340,9 @@ export const MetricsProvider = ({ children }) => {
     return () => clearInterval(interval);
   }, []);
 
+  // ---------------------------
+  // Compute fullBinAlerts / floodRisks
+  // ---------------------------
   useEffect(() => {
     setFullBinAlerts(devices.filter((d) => {
       if (typeof d.binFillPct === 'number') return d.binFillPct >= BIN_FULL_ALERT_PCT;
@@ -363,8 +352,25 @@ export const MetricsProvider = ({ children }) => {
     setFloodRisks(devices.filter((d) => d.flooded).length);
   }, [devices]);
 
+  // Helper to expose logs to consumers
+  const getLogsForDevice = (id) => {
+    const sid = String(id);
+    if (Array.isArray(deviceLogs[sid])) return deviceLogs[sid];
+    const dev = devices.find((d) => String(d.id) === sid);
+    if (dev && Array.isArray(dev.logs)) return dev.logs;
+    return [];
+  };
+
   return (
-    <MetricsContext.Provider value={{ fullBinAlerts, floodRisks, activeDevices, devices, authReady }}>
+    <MetricsContext.Provider value={{
+      fullBinAlerts,
+      floodRisks,
+      activeDevices,
+      devices,
+      authReady,
+      deviceLogs,      // optional raw map (useful for reactive UI)
+      getLogsForDevice, // accessor
+    }}>
       {children}
     </MetricsContext.Provider>
   );
