@@ -61,6 +61,9 @@ export const MetricsProvider = ({ children }) => {
     return out;
   }
 
+  // parseFillPct: only returns an explicit numeric fill percentage from MQTT payload
+  // — do NOT infer from boolean binFull flags. This ensures we use the MQTT-provided
+  // percentage directly when present.
   function parseFillPct(payload) {
     if (!payload || typeof payload !== 'object') return null;
     const candidates = ['fillPct', 'fill_pct', 'binFillPct', 'bin_fill_pct', 'fill'];
@@ -77,12 +80,7 @@ export const MetricsProvider = ({ children }) => {
         }
       }
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'binFull') || Object.prototype.hasOwnProperty.call(payload, 'bin_full')) {
-      const bf = payload.binFull ?? payload.bin_full;
-      if (bf === true) return 100;
-      if (bf === false) return null;
-    }
-    return null;
+    return null; // do not infer from binFull boolean — rely on explicit percentage only
   }
 
   // ---------------------------
@@ -109,14 +107,17 @@ export const MetricsProvider = ({ children }) => {
     if (dbIdsRef.current.has(sid)) return;
     dbIdsRef.current.add(sid);
 
+    const computedBinFill = (typeof initial.binFillPct === 'number') ? initial.binFillPct : null;
+
     const newDev = {
       id: sid,
       createdAt: Date.now(),
       lastSeen: initial.lastSeen ?? Date.now(),
       online: initial.online ?? true,
       logs: Array.isArray(initial.logs) ? initial.logs.slice(0, MAX_LOGS_PER_DEVICE) : [],
-      binFillPct: initial.binFillPct ?? (initial.binFull === true ? 100 : null),
-      binFull: (typeof initial.binFillPct === 'number') ? (initial.binFillPct >= BIN_FULL_ALERT_PCT) : (initial.binFull === true ?? false),
+      binFillPct: computedBinFill,
+      // compute binFull strictly from numeric binFillPct (MQTT authoritative)
+      binFull: (typeof computedBinFill === 'number') ? (computedBinFill >= BIN_FULL_ALERT_PCT) : false,
       ...initial,
     };
 
@@ -125,6 +126,7 @@ export const MetricsProvider = ({ children }) => {
 
   // ---------------------------
   // pushDeviceLog: now works fully locally (creates device if not present)
+  // Uses the MQTT-provided fillPct when available and treats it as authoritative.
   // ---------------------------
   const pushDeviceLog = (deviceId, logObj) => {
     const idStr = String(deviceId);
@@ -148,8 +150,7 @@ export const MetricsProvider = ({ children }) => {
         logs: [logObj],
         lastSeen: Date.now(),
         online: true,
-        binFillPct: pct ?? null,
-        binFull: (pct != null) ? (pct >= BIN_FULL_ALERT_PCT) : false,
+        binFillPct: (pct != null) ? pct : null,
       });
 
       // mark presence and active devices
@@ -164,13 +165,15 @@ export const MetricsProvider = ({ children }) => {
       if (idx > -1) {
         const updated = [...prev];
         const prevLogs = Array.isArray(updated[idx].logs) ? updated[idx].logs : [];
+        const newBinFill = (pct != null) ? pct : (updated[idx].binFillPct ?? null);
         updated[idx] = {
           ...updated[idx],
           logs: [logObj, ...prevLogs].slice(0, MAX_LOGS_PER_DEVICE),
           lastSeen: Date.now(),
           online: true,
-          binFillPct: (pct != null) ? pct : (updated[idx].binFillPct ?? null),
-          binFull: ((pct != null) ? (pct >= BIN_FULL_ALERT_PCT) : (updated[idx].binFull ?? false)),
+          binFillPct: newBinFill,
+          // compute binFull ONLY from numeric binFillPct
+          binFull: (typeof newBinFill === 'number') ? (newBinFill >= BIN_FULL_ALERT_PCT) : (updated[idx].binFull ?? false),
         };
         return updated;
       }
@@ -230,6 +233,9 @@ export const MetricsProvider = ({ children }) => {
       const id = (payload && (payload.id ?? parts[1])) || parts[1]; // Device ID extraction
       const idStr = String(id);
 
+      // compute pct early from MQTT payload so we ALWAYS prefer it
+      const pct = parseFillPct(payload);
+
       // Helper to mark presence and activeDevices
       const markPresence = (deviceId) => {
         const now = Date.now();
@@ -248,7 +254,7 @@ export const MetricsProvider = ({ children }) => {
             }
 
             console.warn(`New device detected via MQTT: ${idStr}. Creating locally (MQTT authoritative).`);
-            addLocalDevice(idStr, { online: true, lastSeen: Date.now() });
+            addLocalDevice(idStr, { online: true, lastSeen: Date.now(), binFillPct: pct ?? null, logs: [] });
 
             const logObj = payload ? { ...payload } : { raw: txt, ts: Date.now() };
             if (logObj.ts === undefined || logObj.ts === null) logObj.ts = Date.now();
@@ -284,7 +290,7 @@ export const MetricsProvider = ({ children }) => {
             return;
           }
 
-          addLocalDevice(idStr, { online: true, lastSeen: Date.now() });
+          addLocalDevice(idStr, { online: true, lastSeen: Date.now(), binFillPct: pct ?? null, logs: [] });
           pushDeviceLog(idStr, logObj);
           markPresence(idStr);
         }).catch((e) => {
@@ -342,12 +348,12 @@ export const MetricsProvider = ({ children }) => {
 
   // ---------------------------
   // Compute fullBinAlerts / floodRisks
+  // Now counts full bins only when an explicit numeric binFillPct is present
+  // and meets the threshold. This avoids inferring fullness from boolean flags
+  // and ensures MQTT-provided percentage is authoritative.
   // ---------------------------
   useEffect(() => {
-    setFullBinAlerts(devices.filter((d) => {
-      if (typeof d.binFillPct === 'number') return d.binFillPct >= BIN_FULL_ALERT_PCT;
-      return Boolean(d.binFull);
-    }).length);
+    setFullBinAlerts(devices.filter((d) => (typeof d.binFillPct === 'number') && (d.binFillPct >= BIN_FULL_ALERT_PCT)).length);
 
     setFloodRisks(devices.filter((d) => d.flooded).length);
   }, [devices]);
