@@ -1,4 +1,3 @@
-// src/MetricsContext.js
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 import { realtimeDB } from './firebase2';
