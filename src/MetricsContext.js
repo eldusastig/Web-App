@@ -1,3 +1,4 @@
+// src/MetricsContext.js
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 
@@ -146,7 +147,7 @@ export const MetricsProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    // MQTT connect and subscriptions
+    // MQTT connect and subscriptions (improved id extraction/validation)
     const url = 'wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt';
     const options = {
       username: 'prototype',
@@ -160,9 +161,45 @@ export const MetricsProvider = ({ children }) => {
     const client = mqtt.connect(url, options);
     clientRef.current = client;
 
+    // Accept device IDs that look like identifiers (alphanumeric, - and _), length 2..64
+    const ID_REGEX = /^[a-zA-Z0-9_-]{2,64}$/;
+    const RESERVED = new Set(['sensor', 'status', 'gps', 'devices', 'meta', 'deleted_devices', 'broadcast', 'mqtt']);
+
+    function extractIdFromTopicAndPayload(topic, payload) {
+      const parts = topic.split('/').filter(Boolean);
+      let candidate = null;
+
+      // If topic looks like esp32/{deviceId}/..., consider parts[1] a candidate
+      if (parts.length >= 2 && parts[0] === 'esp32') {
+        candidate = parts[1];
+        if (typeof candidate === 'string') {
+          const low = candidate.toLowerCase();
+          if (RESERVED.has(low)) candidate = null;
+          else if (!ID_REGEX.test(candidate)) candidate = null;
+        } else candidate = null;
+      }
+
+      // If no valid candidate from topic, try payload.id or common id fields
+      if (!candidate && payload && typeof payload === 'object') {
+        const idFields = ['id', 'deviceId', 'device_id', 'dev_id', 'node_id'];
+        for (const f of idFields) {
+          if (payload[f]) {
+            const v = String(payload[f]).trim();
+            if (ID_REGEX.test(v) && !RESERVED.has(v.toLowerCase())) {
+              candidate = v;
+              break;
+            }
+          }
+        }
+      }
+
+      // if still no candidate, return null (we'll ignore message)
+      return candidate;
+    }
+
     client.on('connect', () => {
       console.log('✅ MQTT connected (mqtt-only metrics)');
-      // Subscribe to all esp32 topics — adjust if you want narrower scope
+      // Subscribe to esp32 topics — narrow if you can to avoid irrelevant topics
       client.subscribe('esp32/#', { qos: 1 }, (err) => {
         if (err) console.error('Subscribe esp32/# failed', err);
         else console.log('Subscribed to esp32/#');
@@ -174,12 +211,11 @@ export const MetricsProvider = ({ children }) => {
       let payload = null;
       try { payload = JSON.parse(txt); } catch (e) { /* not JSON */ }
 
-      const parts = topic.split('/');
-      let id = null;
-      if (parts[0] === 'esp32') id = parts[1] || (payload && payload.id);
-      if (!id && payload && payload.id) id = payload.id;
+      const id = extractIdFromTopicAndPayload(topic, payload);
       if (!id) {
-        // Unknown topic structure — ignore
+        // ignored: no valid device id found in topic or payload
+        // uncomment for debugging:
+        // console.debug(`Ignored MQTT message without valid id — topic="${topic}" payload="${txt.slice(0,200)}"`);
         return;
       }
 
@@ -187,7 +223,7 @@ export const MetricsProvider = ({ children }) => {
       const logObj = payload ? { ...payload } : { raw: txt };
       if (logObj.ts === undefined || logObj.ts === null) logObj.ts = Date.now();
 
-      const wasNew = updateDeviceFromLog(id, logObj);
+      updateDeviceFromLog(id, logObj);
 
       // Optionally: publish a "device/created" retained message so other services know about this device
       // if (wasNew && client && client.connected) {
