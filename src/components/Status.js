@@ -271,8 +271,8 @@ export default function Status() {
   const renderLogItem = (log, idx, device) => {
     if (!log) return null;
     const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
-    const kinds = formatClasses(log);
-    const classesLabel = hasDetections(log) ? `Rubbish Detected - ${kinds ?? 'Unknown'}` : 'None';
+    // show only high-level status: "Rubbish Detected" or "None"
+    const classesLabel = hasDetections(log) ? 'Rubbish Detected' : 'None';
     return (
       <div key={idx} className={css(styles.logItem)}>
         <div className={css(styles.logTimestamp)}>{tsStr || '—'}</div>
