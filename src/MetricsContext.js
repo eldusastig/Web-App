@@ -2,6 +2,18 @@
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 
+// IMPORT YOUR INITIALIZED DATABASE FROM YOUR SEPARATE FILE
+// Example of src/firebase.js that this file expects:
+//
+// import { initializeApp } from 'firebase/app';
+// import { getDatabase } from 'firebase/database';
+// const firebaseConfig = { /* your config */ };
+// const app = initializeApp(firebaseConfig);
+// export const database = getDatabase(app);
+//
+// If your file exports a different name/path, adjust the import below.
+import { database } from './firebase3';
+
 export const MetricsContext = createContext({
   fullBinAlerts: null,
   floodRisks: null,
@@ -18,6 +30,10 @@ export const MetricsProvider = ({ children }) => {
   const clientRef = useRef(null);
   const presenceRef = useRef(new Map()); // Map<id, { online: boolean, lastSeen: number }>
   const devicesMapRef = useRef(new Map()); // Map<id, deviceObj>
+
+  // Prevent repeated DB requests per device for a single app run.
+  // If you want repeated refreshes, you can clear entries or add timestamps.
+  const fetchedMetaRef = useRef(new Set());
 
   const ACTIVE_CUTOFF_MS = 8000;
   const PRUNE_INTERVAL_MS = 2000;
@@ -93,10 +109,11 @@ export const MetricsProvider = ({ children }) => {
         binFillPct: null,
         binFull: false,
         flooded: false,
-        // keep optional lat/lon / fillPct placeholders for UI
+        // placeholders used by UI
         lat: null,
         lon: null,
         fillPct: null,
+        address: null,
       };
     }
 
@@ -135,8 +152,7 @@ export const MetricsProvider = ({ children }) => {
     if (payload && payload.name) dev.name = payload.name;
     if (payload && payload.location) dev.location = payload.location;
 
-    // --- START PATCH: attach lat/lon into the device object if present in payload ---
-    // Accept payload.lat / payload.lon
+    // Attach lat/lon if present in payload
     if (payload) {
       if (payload.lat !== undefined && payload.lon !== undefined) {
         const latN = Number(payload.lat);
@@ -147,7 +163,6 @@ export const MetricsProvider = ({ children }) => {
         }
       }
 
-      // payload.location object might contain lat/lon or latitude/longitude
       if (payload.location && typeof payload.location === 'object') {
         const L = payload.location;
         const latL = (L.lat ?? L.latitude);
@@ -162,7 +177,6 @@ export const MetricsProvider = ({ children }) => {
         }
       }
 
-      // nested gps/coords patterns
       if (payload.gps && typeof payload.gps === 'object') {
         const G = payload.gps;
         const latG = (G.lat ?? G.latitude);
@@ -191,7 +205,6 @@ export const MetricsProvider = ({ children }) => {
         }
       }
     }
-    // --- END PATCH ---
 
     map.set(sid, dev);
 
@@ -289,12 +302,6 @@ export const MetricsProvider = ({ children }) => {
       if (logObj.ts === undefined || logObj.ts === null) logObj.ts = Date.now();
 
       updateDeviceFromLog(id, logObj);
-
-      // Optionally: publish a "device/created" retained message so other services know about this device
-      // if (wasNew && client && client.connected) {
-      //   const metaTopic = `devices/${id}/created`;
-      //   client.publish(metaTopic, JSON.stringify({ id, createdAt: Date.now() }), { qos: 1, retain: true });
-      // }
     });
 
     client.on('error', (err) => console.error('MQTT error', err));
@@ -350,6 +357,110 @@ export const MetricsProvider = ({ children }) => {
     }).length);
 
     setFloodRisks(devices.filter((d) => d.flooded).length);
+  }, [devices]);
+
+  // -----------------------------
+  // Firebase: fetch metadata for devices that are inactive
+  // -----------------------------
+  // We import db helpers lazily to avoid breaking if `database` is not provided.
+  // If you exported `database` from src/firebase.js, this will use it.
+  // Adjust `fetchDeviceMetaFromFirebase` path if your RTDB stores metadata elsewhere.
+  async function fetchDeviceMetaFromFirebase(id) {
+    if (!id) return null;
+    // avoid duplicate requests for same id in this run
+    if (fetchedMetaRef.current.has(id)) return null;
+    fetchedMetaRef.current.add(id);
+
+    if (!database) {
+      console.debug('[MetricsContext] no Firebase database instance available (skipping DB fetch).');
+      return null;
+    }
+
+    try {
+      // lazy-import db functions to avoid bundling issues if firebase not configured
+      const { ref: dbRefFunc, get: dbGetFunc } = await import('firebase/database').then(m => ({ ref: m.ref, get: m.get }));
+
+      // adjust path to your RTDB layout; this assumes /devices/{id}/meta or /devices/{id}
+      // We'll try /devices/{id}/meta, then fallback to /devices/{id}.
+      const path1 = `devices/${id}/meta`;
+      const snapshot1 = await dbGetFunc(dbRefFunc(database, path1));
+      if (snapshot1.exists()) {
+        return snapshot1.val();
+      }
+      const path2 = `devices/${id}`;
+      const snapshot2 = await dbGetFunc(dbRefFunc(database, path2));
+      if (snapshot2.exists()) {
+        return snapshot2.val();
+      }
+      return null;
+    } catch (err) {
+      console.error('[MetricsContext] Firebase fetch error for', id, err);
+      return null;
+    }
+  }
+
+  // When devices list updates, check for offline devices and fetch DB-stored metadata
+  useEffect(() => {
+    if (!devices || devices.length === 0) return;
+
+    devices.forEach((d) => {
+      const id = d.id;
+      // consider offline when both online and active flags are false/undefined
+      const isOffline = !(d.online === true || d.active === true);
+      if (isOffline && !fetchedMetaRef.current.has(id)) {
+        // fetch once and merge
+        fetchDeviceMetaFromFirebase(id).then((meta) => {
+          if (!meta) return;
+          const map = devicesMapRef.current;
+          const dev = map.get(String(id));
+          if (!dev) return;
+
+          let changed = false;
+
+          // Prefer meta.address OR common alternatives
+          const address = meta.address ?? meta.street_address ?? meta.display_name ?? meta.location_name ?? meta.name;
+          if (address && !dev.address) {
+            dev.address = address;
+            changed = true;
+          }
+
+          // Prefer fillPct or similar keys
+          const metaFill = meta.fillPct ?? meta.fill_pct ?? meta.binFillPct ?? meta.bin_fill_pct ?? meta.fill ?? meta.fillPercent ?? meta.fill_percent;
+          if (metaFill !== undefined && metaFill !== null && Number.isFinite(Number(metaFill)) && (dev.fillPct === null || dev.fillPct === undefined)) {
+            const pct = Math.max(0, Math.min(100, Math.round(Number(metaFill))));
+            dev.fillPct = pct;
+            dev.binFillPct = pct;
+            dev.binFull = pct >= BIN_FULL_ALERT_PCT;
+            changed = true;
+          } else if ((meta.binFull === true || meta.bin_full === true) && (dev.binFull !== true)) {
+            dev.binFull = true;
+            dev.binFillPct = dev.binFillPct ?? 100;
+            changed = true;
+          }
+
+          // Merge lat/lon if not present in live object
+          const mLat = meta.lat ?? meta.latitude;
+          const mLon = meta.lon ?? meta.longitude ?? meta.lng;
+          if ((mLat !== undefined && mLon !== undefined) && (!Number.isFinite(dev.lat) || !Number.isFinite(dev.lon))) {
+            const latN = Number(mLat);
+            const lonN = Number(mLon);
+            if (Number.isFinite(latN) && Number.isFinite(lonN)) {
+              dev.lat = latN;
+              dev.lon = lonN;
+              changed = true;
+            }
+          }
+
+          if (changed) {
+            map.set(String(id), dev);
+            const arr = Array.from(map.values()).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+            setDevices(arr);
+          }
+        }).catch((e) => {
+          console.debug('[MetricsContext] fetchDeviceMetaFromFirebase failed for', id, e);
+        });
+      }
+    });
   }, [devices]);
 
   return (
