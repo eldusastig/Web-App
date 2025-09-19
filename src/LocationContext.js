@@ -4,7 +4,7 @@ import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 
 // Import the shared firebase database instance (must be exported from src/firebase.js)
-import { database } from './firebase';
+import { database } from './firebase3';
 
 import { ref as dbRef, get as dbGet } from 'firebase/database';
 
@@ -402,3 +402,4 @@ export const LocationProvider = ({ children }) => {
     </LocationContext.Provider>
   );
 };
+
