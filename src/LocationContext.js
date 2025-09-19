@@ -43,22 +43,37 @@ function parseLocationFromPayload(payload) {
   }
 
   if (typeof payload === 'object') {
-    // common lat/lon candidate pairs
+    // If both top-level lat & lon exist (exact match), accept them immediately
+    if ((Object.prototype.hasOwnProperty.call(payload, 'lat') || Object.prototype.hasOwnProperty.call(payload, 'latitude')) &&
+        (Object.prototype.hasOwnProperty.call(payload, 'lon') || Object.prototype.hasOwnProperty.call(payload, 'longitude') || Object.prototype.hasOwnProperty.call(payload, 'lng'))) {
+      // prefer canonical names if present
+      const latKey = Object.prototype.hasOwnProperty.call(payload, 'lat') ? 'lat' : (Object.prototype.hasOwnProperty.call(payload, 'latitude') ? 'latitude' : 'lat');
+      const lonKey = Object.prototype.hasOwnProperty.call(payload, 'lon') ? 'lon' : (Object.prototype.hasOwnProperty.call(payload, 'longitude') ? 'longitude' : 'lon');
+      // use values only if both are finite when coerced
+      const maybeLat = payload[latKey];
+      const maybeLon = payload[lonKey];
+      const parsed = normalizeLatLon(maybeLat, maybeLon);
+      if (parsed) return parsed;
+    }
+
+    // common lat/lon candidate pairs (require BOTH keys to be present)
     const gpsCandidates = [
       ['lat','lon'], ['latitude','longitude'], ['lat','lng'], ['latitude','lng'], ['gpsLat','gpsLon'],
       ['Lat','Lon'], ['Latitude','Longitude'], ['LAT','LON']
     ];
 
     for (const [la, lo] of gpsCandidates) {
-      if ((payload[la] !== undefined) || (payload[lo] !== undefined)) {
-        return normalizeLatLon(payload[la], payload[lo]);
+      if (Object.prototype.hasOwnProperty.call(payload, la) && Object.prototype.hasOwnProperty.call(payload, lo)) {
+        const parsed = normalizeLatLon(payload[la], payload[lo]);
+        if (parsed) return parsed;
       }
     }
 
     // nested gps object patterns
     if (payload.gps && typeof payload.gps === 'object') {
       const g = payload.gps;
-      return parseLocationFromPayload(g);
+      const parsed = parseLocationFromPayload(g);
+      if (parsed) return parsed;
     }
 
     if (payload.position && typeof payload.position === 'string') {
@@ -69,13 +84,15 @@ function parseLocationFromPayload(payload) {
 
     // location or coords objects
     if (payload.location && typeof payload.location === 'object') {
-      return parseLocationFromPayload(payload.location);
+      const parsed = parseLocationFromPayload(payload.location);
+      if (parsed) return parsed;
     }
     if (payload.coords && typeof payload.coords === 'object') {
-      return parseLocationFromPayload(payload.coords);
+      const parsed = parseLocationFromPayload(payload.coords);
+      if (parsed) return parsed;
     }
 
-    // fallback: find any key that contains 'lat' and pair with a lon-like key
+    // fallback: find any key that contains 'lat' and pair with a lon-like key (require both)
     const keys = Object.keys(payload);
     for (let i = 0; i < keys.length; i++) {
       const k = keys[i];
@@ -85,7 +102,10 @@ function parseLocationFromPayload(payload) {
           const s = kk.toLowerCase();
           return s.includes('lon') || s.includes('lng') || s.includes('long');
         });
-        if (lonKey) return normalizeLatLon(payload[k], payload[lonKey]);
+        if (lonKey && Object.prototype.hasOwnProperty.call(payload, lonKey)) {
+          const parsed = normalizeLatLon(payload[k], payload[lonKey]);
+          if (parsed) return parsed;
+        }
       }
     }
   }
@@ -145,7 +165,7 @@ export const LocationProvider = ({ children }) => {
     if (!candidate && payload && typeof payload === 'object') {
       const idFields = ['id', 'deviceId', 'device_id', 'dev_id', 'node_id', 'name'];
       for (const f of idFields) {
-        if (payload[f]) {
+        if (Object.prototype.hasOwnProperty.call(payload, f) && payload[f]) {
           const v = String(payload[f]).trim();
           if (ID_REGEX.test(v) && !RESERVED.has(v.toLowerCase())) {
             candidate = v;
