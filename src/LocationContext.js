@@ -1,12 +1,22 @@
-// src/LocationContext.js — verbose debug edition
+// src/LocationContext.js
+// LocationContext with Firebase fallback and cache TTL
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 
+// Import the shared firebase database instance (must be exported from src/firebase.js)
+import { database } from './firebase';
+
+import { ref as dbRef, get as dbGet } from 'firebase/database';
+
 export const LocationContext = createContext({ locations: [] });
 
-// Turn on while debugging — set to false once working
+// Toggle verbose logs
 const DEBUG = true;
 
+// CACHE TTL for DB fallback (ms)
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Helpers: normalization & parsing
 function normalizeLatLon(latRaw, lonRaw) {
   const a = Number(latRaw);
   const b = Number(lonRaw);
@@ -22,9 +32,7 @@ function normalizeLatLon(latRaw, lonRaw) {
 function parseLocationFromPayload(payload) {
   if (!payload) return null;
 
-  // If payload is already an object with numeric lat/lon fields, accept
   if (typeof payload === 'object' && !Array.isArray(payload)) {
-    // direct canonical fields check (both required)
     const possibleLatKeys = ['lat','latitude','Lat','Latitude','LAT'];
     const possibleLonKeys = ['lon','lng','longitude','Lon','Longitude','LON','Lng'];
 
@@ -38,7 +46,6 @@ function parseLocationFromPayload(payload) {
     }
   }
 
-  // string like "12.34,56.78" or "12.34 56.78"
   if (typeof payload === 'string') {
     const s = payload.trim();
     const parts = s.split(/[ ,;|]+/).map(p => p.trim()).filter(Boolean);
@@ -46,13 +53,11 @@ function parseLocationFromPayload(payload) {
     return null;
   }
 
-  // array [lat, lon]
   if (Array.isArray(payload)) {
     if (payload.length >= 2) return normalizeLatLon(payload[0], payload[1]);
     return null;
   }
 
-  // nested patterns
   if (typeof payload === 'object') {
     if (payload.gps && typeof payload.gps === 'object') {
       const r = parseLocationFromPayload(payload.gps);
@@ -67,7 +72,6 @@ function parseLocationFromPayload(payload) {
       if (r) return r;
     }
 
-    // fallback: search keys that include 'lat' and 'lon'-like
     const keys = Object.keys(payload);
     for (let i = 0; i < keys.length; i++) {
       const k = keys[i];
@@ -90,34 +94,56 @@ function parseLocationFromPayload(payload) {
 export const LocationProvider = ({ children }) => {
   const [locations, setLocations] = useState([]);
   const clientRef = useRef(null);
-  const devicesMapRef = useRef(new Map());
+
+  // Mirrors the presence / device map pattern from your other contexts
+  const devicesMapRef = useRef(new Map()); // id -> device object { id, lat, lon, lastSeen, address, fillPct, online }
+  const presenceRef = useRef(new Map()); // id -> { online: boolean, lastSeen: number }
+
+  // map of id->lastFetchedTs to rate-limit DB fallback queries
+  const fetchedMetaRef = useRef(new Map()); // id -> timestamp
+
   const ACTIVE_CUTOFF_MS = 10000;
   const PRUNE_INTERVAL_MS = 3000;
 
   const ID_REGEX = /^[a-zA-Z0-9_.-]{1,80}$/;
   const RESERVED = new Set(['sensor', 'status', 'gps', 'devices', 'meta', 'deleted_devices', 'broadcast', 'mqtt']);
 
+  function flushLocations() {
+    const arr = Array.from(devicesMapRef.current.values())
+      .filter(d => Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon)))
+      .map(d => ({
+        id: d.id,
+        lat: Number(d.lat),
+        lon: Number(d.lon),
+        lastSeen: d.lastSeen,
+        address: d.address ?? null,
+        fillPct: d.fillPct ?? null,
+        _usingDbFallback: !!d._usingDbFallback,
+      }))
+      .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+    setLocations(arr);
+    if (DEBUG) console.debug('[Location] flushLocations ->', arr);
+  }
+
   function updateDeviceLocation(id, lat, lon) {
     if (!id) return;
     const sid = String(id);
     const now = Date.now();
     const map = devicesMapRef.current;
-    const prev = map.get(sid) || { id: sid, lat: null, lon: null, lastSeen: now };
+    const prev = map.get(sid) || { id: sid, lat: null, lon: null, lastSeen: now, address: null, fillPct: null, online: true };
     prev.lat = lat;
     prev.lon = lon;
     prev.lastSeen = now;
+    prev.online = true;
+    prev._usingDbFallback = false; // real-time message overrides fallback
     map.set(sid, prev);
-    flushLocations();
-    if (DEBUG) console.debug('[Location] updateDeviceLocation ->', sid, { lat, lon, lastSeen: now });
-  }
 
-  function flushLocations() {
-    const arr = Array.from(devicesMapRef.current.values())
-      .filter(d => Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon)))
-      .map(d => ({ id: d.id, lat: Number(d.lat), lon: Number(d.lon), lastSeen: d.lastSeen }))
-      .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
-    setLocations(arr);
-    if (DEBUG) console.debug('[Location] flushLocations ->', arr);
+    presenceRef.current.set(sid, { online: true, lastSeen: now });
+    setTimeout(() => { // defer flush to batch multiple incoming updates
+      flushLocations();
+    }, 0);
+
+    if (DEBUG) console.debug('[Location] updateDeviceLocation ->', sid, { lat, lon, lastSeen: now });
   }
 
   function extractIdFromTopicAndPayload(topic, payload) {
@@ -156,6 +182,45 @@ export const LocationProvider = ({ children }) => {
     return candidate;
   }
 
+  // Fetch metadata from Firebase RTDB for a given device id.
+  // Tries /devices/{id}/meta then /devices/{id}. Merges address / lat / lon / fillPct.
+  async function fetchDeviceMetaFromFirebase(id) {
+    if (!id) return null;
+    if (!database) {
+      if (DEBUG) console.warn('[Location] Firebase DB not available — cannot fetch meta for', id);
+      return null;
+    }
+
+    const last = fetchedMetaRef.current.get(id);
+    if (last && (Date.now() - last) < CACHE_TTL_MS) {
+      if (DEBUG) console.debug('[Location] meta cached recently for', id);
+      return null;
+    }
+    // mark fetch time immediately to avoid duplicate concurrent fetches
+    fetchedMetaRef.current.set(id, Date.now());
+
+    try {
+      const path1 = `devices/${id}/meta`;
+      const snap1 = await dbGet(dbRef(database, path1));
+      if (snap1.exists()) {
+        if (DEBUG) console.debug('[Location] fetched meta from', path1, snap1.val());
+        return snap1.val();
+      }
+      const path2 = `devices/${id}`;
+      const snap2 = await dbGet(dbRef(database, path2));
+      if (snap2.exists()) {
+        if (DEBUG) console.debug('[Location] fetched meta from', path2, snap2.val());
+        return snap2.val();
+      }
+      if (DEBUG) console.debug('[Location] no firebase meta for', id);
+      return null;
+    } catch (err) {
+      console.error('[Location] Firebase fetch error for', id, err && err.message ? err.message : err);
+      return null;
+    }
+  }
+
+  // MQTT: listen and extract lat/lon messages
   useEffect(() => {
     const url = 'wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt';
     const options = {
@@ -172,7 +237,6 @@ export const LocationProvider = ({ children }) => {
 
     client.on('connect', () => {
       console.log('📍 LocationContext: MQTT connected');
-      // subscribe broadly plus explicit gps topics
       client.subscribe('esp32/#', { qos: 1 }, (err) => { if (err) console.error('subscribe esp32/# failed', err); });
       client.subscribe('esp32/+/gps', { qos: 1 }, (err) => { if (err) console.error('subscribe esp32/+/gps failed', err); });
       client.subscribe('esp32/gps', { qos: 1 }, (err) => { if (err) console.error('subscribe esp32/gps failed', err); });
@@ -192,11 +256,10 @@ export const LocationProvider = ({ children }) => {
         try { parsed = JSON.parse(txt); if (DEBUG) console.debug('📍 JSON parsed', parsed); }
         catch (e) { if (DEBUG) console.debug('📍 JSON parse failed, keeping raw text'); parsed = txt; }
 
-        // If parsed is object, try to extract id & location directly
         const payloadObject = (typeof parsed === 'object' && parsed !== null) ? parsed : null;
         const id = extractIdFromTopicAndPayload(topic, payloadObject);
 
-        // Quick heuristic: if payload object has lat & lon AND id field, accept immediately
+        // If payload contains lat & lon and id, quick accept
         if (payloadObject && Object.prototype.hasOwnProperty.call(payloadObject, 'lat') && Object.prototype.hasOwnProperty.call(payloadObject, 'lon')) {
           const quickId = payloadObject.id ? String(payloadObject.id) : id;
           if (quickId) {
@@ -209,13 +272,11 @@ export const LocationProvider = ({ children }) => {
           }
         }
 
-        // Normal flow: need a valid id and parseable location
         if (!id) {
           if (DEBUG) console.warn('📍 Message ignored: no valid id extracted', { topic, sample: txt });
           return;
         }
 
-        // parse location either from object or raw text
         const loc = parseLocationFromPayload(payloadObject || txt);
         if (loc) {
           if (DEBUG) console.debug('📍 Parsed location', { topic, id, loc });
@@ -232,24 +293,106 @@ export const LocationProvider = ({ children }) => {
     client.on('error', (err) => console.error('📍 LocationContext MQTT error', err));
 
     return () => {
-      try { client.end(true); } catch (e) { /* ignore */ }
+      try { client.end(true); } catch (e) {}
       clientRef.current = null;
     };
   }, []);
 
+  // Periodic prune: mark offline devices and attempt DB fallback merge for those IDs
   useEffect(() => {
-    const interval = setInterval(() => {
-      const cutoff = Date.now() - ACTIVE_CUTOFF_MS;
-      let changed = false;
-      devicesMapRef.current.forEach((d, id) => {
+    const interval = setInterval(async () => {
+      const now = Date.now();
+      const cutoff = now - ACTIVE_CUTOFF_MS;
+      const map = devicesMapRef.current;
+      let clearedAny = false;
+
+      // mark expired devices: set lat/lon null to indicate live loc gone
+      map.forEach((d, id) => {
         if (d.lastSeen && d.lastSeen < cutoff && (d.lat !== null || d.lon !== null)) {
-          d.lat = null; d.lon = null;
-          devicesMapRef.current.set(id, d);
-          changed = true;
+          d.lat = null;
+          d.lon = null;
+          d._clearedForFallback = true;
+          d.online = false;
+          map.set(id, d);
+          clearedAny = true;
+          if (DEBUG) console.debug('[Location] device expired -> cleared live location', id);
         }
       });
-      if (changed) flushLocations();
+
+      // update presenceRef and devices state if presence changed
+      presenceRef.current.forEach((p, id) => {
+        if (p.lastSeen && p.lastSeen < cutoff && p.online) {
+          presenceRef.current.set(id, { online: false, lastSeen: p.lastSeen });
+        }
+      });
+
+      // Attempt DB fallback for cleared devices
+      if (clearedAny && database) {
+        const promises = [];
+        map.forEach((d, id) => {
+          if (d._clearedForFallback && !d._usingDbFallback) {
+            promises.push((async () => {
+              const meta = await fetchDeviceMetaFromFirebase(id);
+              if (!meta) return null;
+
+              let changed = false;
+
+              // lat/lon from metadata
+              const mLat = meta.lat ?? meta.latitude ?? meta.lat_deg ?? null;
+              const mLon = meta.lon ?? meta.longitude ?? meta.lng ?? null;
+              if ((mLat !== undefined && mLon !== undefined) && (!Number.isFinite(d.lat) || !Number.isFinite(d.lon))) {
+                const latN = Number(mLat);
+                const lonN = Number(mLon);
+                if (Number.isFinite(latN) && Number.isFinite(lonN)) {
+                  d.lat = latN;
+                  d.lon = lonN;
+                  changed = true;
+                }
+              }
+
+              // address fallback
+              const address = meta.address ?? meta.street_address ?? meta.display_name ?? meta.location_name ?? meta.name ?? null;
+              if (address && !d.address) {
+                d.address = address;
+                changed = true;
+              }
+
+              // fillPct fallback
+              const metaFill = meta.fillPct ?? meta.fill_pct ?? meta.binFillPct ?? meta.bin_fill_pct ?? meta.fill ?? meta.fillPercent ?? meta.fill_percent;
+              if (metaFill !== undefined && metaFill !== null && Number.isFinite(Number(metaFill)) && (d.fillPct === null || d.fillPct === undefined)) {
+                const pct = Math.max(0, Math.min(100, Math.round(Number(metaFill))));
+                d.fillPct = pct;
+                d.binFillPct = pct;
+                d.binFull = pct >= 90;
+                changed = true;
+              } else if ((meta.binFull === true || meta.bin_full === true) && (d.binFull !== true)) {
+                d.binFull = true;
+                d.binFillPct = d.binFillPct ?? 100;
+                changed = true;
+              }
+
+              if (changed) {
+                d._usingDbFallback = true;
+                d._clearedForFallback = false;
+                map.set(id, d);
+                if (DEBUG) console.debug('[Location] merged DB fallback meta into device', id, { lat: d.lat, lon: d.lon, address: d.address, fillPct: d.fillPct });
+              }
+              return id;
+            })());
+          }
+        });
+
+        try {
+          await Promise.all(promises);
+        } catch (e) {
+          console.warn('[Location] error during DB fallback fetches', e);
+        }
+      }
+
+      // flush locations (will include DB fallback lat/lon if any merged)
+      flushLocations();
     }, PRUNE_INTERVAL_MS);
+
     return () => clearInterval(interval);
   }, []);
 
