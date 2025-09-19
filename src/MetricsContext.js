@@ -93,6 +93,10 @@ export const MetricsProvider = ({ children }) => {
         binFillPct: null,
         binFull: false,
         flooded: false,
+        // keep optional lat/lon / fillPct placeholders for UI
+        lat: null,
+        lon: null,
+        fillPct: null,
       };
     }
 
@@ -113,9 +117,12 @@ export const MetricsProvider = ({ children }) => {
     if (pct != null) {
       dev.binFillPct = pct;
       dev.binFull = pct >= BIN_FULL_ALERT_PCT;
+      // mirror for UI convenience (Status component expects d.fillPct)
+      dev.fillPct = pct;
     } else if (typeof payload?.binFull === 'boolean') {
       dev.binFull = payload.binFull;
       dev.binFillPct = payload.binFull ? 100 : dev.binFillPct;
+      if (dev.binFillPct !== null) dev.fillPct = dev.binFillPct;
     }
 
     if (payload && (payload.flooded === true || payload.flood === true)) {
@@ -127,6 +134,64 @@ export const MetricsProvider = ({ children }) => {
     // Merge shallow metadata from payload
     if (payload && payload.name) dev.name = payload.name;
     if (payload && payload.location) dev.location = payload.location;
+
+    // --- START PATCH: attach lat/lon into the device object if present in payload ---
+    // Accept payload.lat / payload.lon
+    if (payload) {
+      if (payload.lat !== undefined && payload.lon !== undefined) {
+        const latN = Number(payload.lat);
+        const lonN = Number(payload.lon);
+        if (Number.isFinite(latN) && Number.isFinite(lonN)) {
+          dev.lat = latN;
+          dev.lon = lonN;
+        }
+      }
+
+      // payload.location object might contain lat/lon or latitude/longitude
+      if (payload.location && typeof payload.location === 'object') {
+        const L = payload.location;
+        const latL = (L.lat ?? L.latitude);
+        const lonL = (L.lon ?? L.lng ?? L.longitude);
+        if (latL !== undefined && lonL !== undefined) {
+          const latN = Number(latL);
+          const lonN = Number(lonL);
+          if (Number.isFinite(latN) && Number.isFinite(lonN)) {
+            dev.lat = latN;
+            dev.lon = lonN;
+          }
+        }
+      }
+
+      // nested gps/coords patterns
+      if (payload.gps && typeof payload.gps === 'object') {
+        const G = payload.gps;
+        const latG = (G.lat ?? G.latitude);
+        const lonG = (G.lon ?? G.lng ?? G.longitude);
+        if (latG !== undefined && lonG !== undefined) {
+          const latN = Number(latG);
+          const lonN = Number(lonG);
+          if (Number.isFinite(latN) && Number.isFinite(lonN)) {
+            dev.lat = latN;
+            dev.lon = lonN;
+          }
+        }
+      }
+
+      if (payload.coords && typeof payload.coords === 'object') {
+        const C = payload.coords;
+        const latC = (C.lat ?? C.latitude ?? (Array.isArray(C) ? C[0] : undefined));
+        const lonC = (C.lon ?? C.lng ?? C.longitude ?? (Array.isArray(C) ? C[1] : undefined));
+        if (latC !== undefined && lonC !== undefined) {
+          const latN = Number(latC);
+          const lonN = Number(lonC);
+          if (Number.isFinite(latN) && Number.isFinite(lonN)) {
+            dev.lat = latN;
+            dev.lon = lonN;
+          }
+        }
+      }
+    }
+    // --- END PATCH ---
 
     map.set(sid, dev);
 
