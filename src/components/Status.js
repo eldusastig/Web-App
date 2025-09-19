@@ -50,7 +50,7 @@ export default function Status() {
     else if (mq.addListener) mq.addListener(handler);
     return () => {
       if (mq.removeEventListener) mq.removeEventListener('change', handler);
-      else if (mq.removeListener) mq.removeListener('change', handler);
+      else if (mq.removeListener) mq.removeListener(handler);
     };
   }, []);
 
@@ -189,13 +189,11 @@ export default function Status() {
   };
 
   // ---------------------------
-  // Logs loading (FIXED)
+  // Logs loading
   // ---------------------------
   const loadLogsForDevice = async (device) => {
     const id = device.id;
     if (logsMap[id] || loadingLogs[id]) return;
-
-    // If device already has logs embedded, normalize and use them.
     if (Array.isArray(device.logs) && device.logs.length > 0) {
       const normalized = device.logs.map(normalizeLog).filter(Boolean);
       setLogsMap((m) => ({ ...m, [id]: normalized }));
@@ -204,58 +202,15 @@ export default function Status() {
 
     setLoadingLogs((m) => ({ ...m, [id]: true }));
     setErrorLogs((m) => ({ ...m, [id]: null }));
-
-    // small helper to truncate long bodies shown in UI
-    const truncate = (s, n = 300) => {
-      if (!s) return s;
-      if (s.length <= n) return s;
-      return s.slice(0, n) + '…';
-    };
-
     try {
-      const url = `/api/devices/${encodeURIComponent(id)}/logs`;
-      console.debug(`[Status] fetching logs for ${id}: ${url}`);
-      // Use same-origin credentials so cookies are sent when applicable.
-      const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-
-      if (!res.ok) {
-        // read response text (best-effort) to include in error
-        let body = '';
-        try {
-          body = await res.text();
-        } catch (e) {
-          body = '<unreadable response body>';
-        }
-        const msg = `HTTP ${res.status} ${res.statusText}${body ? ` — ${truncate(body)}` : ''}`;
-        console.error(`[Status] loadLogsForDevice ${id} failed: ${msg}`);
-
-        // 404 -> treat as no logs rather than an error
-        if (res.status === 404) {
-          setLogsMap((m) => ({ ...m, [id]: [] }));
-          setErrorLogs((m) => ({ ...m, [id]: null }));
-          return;
-        }
-
-        setErrorLogs((m) => ({ ...m, [id]: `Failed to load logs: ${res.status} ${res.statusText}` }));
-        return;
-      }
-
-      // Try JSON parse (safe)
-      let json;
-      try {
-        json = await res.json();
-      } catch (e) {
-        const text = await res.text().catch(() => '<unreadable>');
-        console.error(`[Status] loadLogsForDevice ${id} — JSON parse failed, body:`, truncate(text), e);
-        setErrorLogs((m) => ({ ...m, [id]: 'Failed to parse logs (invalid JSON)' }));
-        return;
-      }
-
+      const res = await fetch(`/api/devices/${encodeURIComponent(id)}/logs`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
       const normalized = Array.isArray(json) ? json.map(normalizeLog).filter(Boolean) : [normalizeLog(json)].filter(Boolean);
       setLogsMap((m) => ({ ...m, [id]: normalized }));
     } catch (err) {
-      console.error(`[Status] loadLogsForDevice ${id} exception:`, err);
-      setErrorLogs((m) => ({ ...m, [id]: `Failed to load logs: ${err && err.message ? err.message : String(err)}` }));
+      console.error('Failed to load logs for', id, err);
+      setErrorLogs((m) => ({ ...m, [id]: 'Failed to load logs' }));
     } finally {
       setLoadingLogs((m) => ({ ...m, [id]: false }));
     }
@@ -316,8 +271,8 @@ export default function Status() {
   const renderLogItem = (log, idx, device) => {
     if (!log) return null;
     const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
-    // show only high-level status: "Rubbish Detected" or "None"
-    const classesLabel = hasDetections(log) ? 'Rubbish Detected' : 'None';
+    const kinds = formatClasses(log);
+    const classesLabel = hasDetections(log) ? `Rubbish Detected - ${kinds ?? 'Unknown'}` : 'None';
     return (
       <div key={idx} className={css(styles.logItem)}>
         <div className={css(styles.logTimestamp)}>{tsStr || '—'}</div>
