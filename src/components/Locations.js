@@ -1,5 +1,4 @@
 // src/components/Locations.jsx
-
 import React, {
   useContext,
   useState,
@@ -17,11 +16,9 @@ import {
 import L from 'leaflet';
 import { FiMapPin } from 'react-icons/fi';
 import { DeviceContext } from '../DeviceContext';
+import { LocationContext } from '../LocationContext'; // <-- use the LocationContext
 
-// ───────────────
-// 1) Define four custom Leaflet icons (using CSS classes to recolor the default marker).
-//    You can tweak these CSS filters or adjust iconUrl if you have custom PNGs.
-// ───────────────
+// icons (same as your original)
 const greenIcon = new L.Icon({
   iconUrl:
     'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
@@ -31,9 +28,8 @@ const greenIcon = new L.Icon({
   shadowUrl:
     'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
   shadowSize: [41, 41],
-  className: 'leaflet-marker-green', // apply a green filter via CSS
+  className: 'leaflet-marker-green',
 });
-
 const orangeIcon = new L.Icon({
   iconUrl:
     'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
@@ -45,7 +41,6 @@ const orangeIcon = new L.Icon({
   shadowSize: [41, 41],
   className: 'leaflet-marker-orange',
 });
-
 const redIcon = new L.Icon({
   iconUrl:
     'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
@@ -57,7 +52,6 @@ const redIcon = new L.Icon({
   shadowSize: [41, 41],
   className: 'leaflet-marker-red',
 });
-
 const grayIcon = new L.Icon({
   iconUrl:
     'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
@@ -70,10 +64,6 @@ const grayIcon = new L.Icon({
   className: 'leaflet-marker-gray',
 });
 
-// ───────────────
-// 2) PanToDevice helper: inside MapContainer, it listens for drag/zoom events
-//    and automatically pans/zooms to the selected device only if the user hasn’t moved the map.
-// ───────────────
 function PanToDevice({ selectedDeviceId, devicesToShow, userMovedMap }) {
   const map = useMapEvents({
     dragstart: () => (userMovedMap.current = true),
@@ -83,23 +73,18 @@ function PanToDevice({ selectedDeviceId, devicesToShow, userMovedMap }) {
   useEffect(() => {
     if (!selectedDeviceId || userMovedMap.current || !map) return;
     const device = devicesToShow.find((d) => d.id === selectedDeviceId);
-    if (
-      device &&
-      typeof device.lat === 'number' &&
-      typeof device.lon === 'number'
-    ) {
-      map.setView([device.lat, device.lon], 80);
+    if (device && typeof device.lat === 'number' && typeof device.lon === 'number') {
+      // nice zoom level (15 is a street-level zoom). 80 in your previous code looked like a typo.
+      map.setView([device.lat, device.lon], 15, { animate: true });
     }
   }, [selectedDeviceId, devicesToShow, map]);
 
   return null;
 }
 
-// ───────────────
-// 3) Main Locations component
-// ───────────────
 export default function Locations() {
-  const { devices } = useContext(DeviceContext);
+  const { devices: metaDevices } = useContext(DeviceContext); // metadata (may come from firebase or mqtt)
+  const { locations } = useContext(LocationContext); // authoritative lat/lon from LocationContext
   const [selectedDeviceId, setSelectedDeviceId] = useState(null);
   const [deviceAddresses, setDeviceAddresses] = useState({});
   const [showFlooded, setShowFlooded] = useState(false);
@@ -107,80 +92,94 @@ export default function Locations() {
   const [showInactive, setShowInactive] = useState(false);
   const userMovedMap = useRef(false);
 
-  // 3a) Filter out anything without valid lat/lon
-  const gpsDevices = useMemo(
-    () =>
-      devices.filter(
-        (d) =>
-          typeof d.lat === 'number' &&
-          typeof d.lon === 'number'
-      ),
-    [devices]
-  );
+  // build a quick lookup for metadata by id
+  const metaById = useMemo(() => {
+    const m = new Map();
+    (metaDevices || []).forEach((d) => {
+      if (d && d.id) m.set(String(d.id), d);
+    });
+    return m;
+  }, [metaDevices]);
 
-  // 3b) Build final list based on checkboxes:
+  // Merge locations (positions) with metadata
+  // locations: [{id, lat, lon, lastSeen}, ...]
+  const mergedDevices = useMemo(() => {
+    const out = (locations || []).map((loc) => {
+      const id = String(loc.id);
+      const meta = metaById.get(id) || {};
+      return {
+        id,
+        lat: Number(loc.lat),
+        lon: Number(loc.lon),
+        lastSeen: loc.lastSeen || null,
+        // metadata fallbacks
+        flooded: meta.flooded ?? meta.flood ?? false,
+        binFull: meta.binFull ?? meta.bin_full ?? meta.fillPct ? (Number(meta.fillPct) >= 90) : (meta.binFull ?? false),
+        active: meta.active ?? meta.online ?? true, // assume active if no metadata yet
+        name: meta.name ?? meta.label ?? id,
+        rawMeta: meta,
+      };
+    });
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug('Locations: mergedDevices', out);
+      // Also show devices that have meta but no GPS (helpful for debugging)
+      const metaWithoutLoc = (metaDevices || []).filter(md => md && md.id && !locations.find(l => String(l.id) === String(md.id)));
+      if (metaWithoutLoc.length) console.debug('Locations: meta devices without GPS', metaWithoutLoc);
+    }
+    return out;
+  }, [locations, metaById, metaDevices]);
+
+  // Apply filters (showFlooded / showBinFull / showInactive)
   const devicesToShow = useMemo(() => {
-    return gpsDevices.filter((d) => {
-      // (A) If ONLY “Inactive” is checked:
+    return mergedDevices.filter((d) => {
+      // If ONLY “Inactive” is checked, show devices that are inactive
       if (showInactive && !showFlooded && !showBinFull) {
         return !d.active;
       }
-      // (B) If “Inactive” not checked, drop inactive immediately:
+      // If inactive not checked, drop inactive
       if (!showInactive && !d.active) {
         return false;
       }
-      // (C) Now if no Flooded/BinFull selected, accept (we passed A and B):
-      if (!showFlooded && !showBinFull) {
-        return true;
-      }
-      // (D) If Flooded is checked and this device is flooded:
-      if (showFlooded && d.flooded) {
-        return true;
-      }
-      // (E) If BinFull is checked and this device’s bin is full:
-      if (showBinFull && d.binFull) {
-        return true;
-      }
-      // Otherwise, exclude:
+      // If no flood/bin filters selected, include
+      if (!showFlooded && !showBinFull) return true;
+      if (showFlooded && d.flooded) return true;
+      if (showBinFull && d.binFull) return true;
       return false;
     });
-  }, [gpsDevices, showFlooded, showBinFull, showInactive]);
+  }, [mergedDevices, showFlooded, showBinFull, showInactive]);
 
-  // 3c) Reverse‐geocode any newly visible device
+  // reverse‐geocode newly visible devices (cache results)
   useEffect(() => {
     devicesToShow.forEach((device) => {
       const { id, lat, lon } = device;
+      if (!lat || !lon) return;
       if (deviceAddresses[id]) return; // already fetched
       const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}`;
+      // throttle / polite usage: don't hammer OSM - you might want to add rate-limiting
       fetch(url)
         .then((res) => res.json())
         .then((data) => {
           const address = data.display_name || 'Unknown location';
-          setDeviceAddresses((prev) => ({
-            ...prev,
-            [id]: address,
-          }));
+          setDeviceAddresses((prev) => ({ ...prev, [id]: address }));
         })
-        .catch(() => {
-          setDeviceAddresses((prev) => ({
-            ...prev,
-            [id]: 'No address found',
-          }));
+        .catch((err) => {
+          console.warn('Reverse geocode failed for', id, err);
+          setDeviceAddresses((prev) => ({ ...prev, [id]: 'No address found' }));
         });
     });
   }, [devicesToShow, deviceAddresses]);
 
-  // 3d) Compute initial center/zoom
+  // initial map center (use first visible device)
   const initialCenter = useMemo(() => {
     if (devicesToShow.length > 0) {
       return [devicesToShow[0].lat, devicesToShow[0].lon];
     }
+    // fallback to a reasonable center if you prefer your city
     return [0, 0];
   }, [devicesToShow]);
 
-  const initialZoom = useMemo(() => {
-    return devicesToShow.length > 0 ? 15 : 2;
-  }, [devicesToShow]);
+  const initialZoom = useMemo(() => (devicesToShow.length > 0 ? 15 : 2), [devicesToShow]);
 
   return (
     <div style={styles.container}>
@@ -188,7 +187,6 @@ export default function Locations() {
         <FiMapPin /> Device Locations
       </div>
 
-      {/* ─── Filters ──────────────────────────────────────────────────── */}
       <div style={styles.filterContainer}>
         <label style={styles.filterLabel}>
           <input
@@ -218,7 +216,6 @@ export default function Locations() {
         </label>
       </div>
 
-      {/* ─── Map ──────────────────────────────────────────────────────── */}
       <div style={styles.mapWrapper}>
         <MapContainer
           center={initialCenter}
@@ -234,13 +231,9 @@ export default function Locations() {
           {devicesToShow.map((device) => {
             const address = deviceAddresses[device.id];
             let iconToUse = greenIcon;
-            if (device.flooded) {
-              iconToUse = redIcon;
-            } else if (device.binFull) {
-              iconToUse = orangeIcon;
-            } else if (!device.active) {
-              iconToUse = grayIcon;
-            }
+            if (device.flooded) iconToUse = redIcon;
+            else if (device.binFull) iconToUse = orangeIcon;
+            else if (!device.active) iconToUse = grayIcon;
 
             return (
               <Marker
@@ -252,7 +245,7 @@ export default function Locations() {
                 }}
               >
                 <Popup>
-                  <b>{device.id}</b>
+                  <b>{device.name || device.id}</b>
                   <br />
                   {address
                     ? address
@@ -276,7 +269,6 @@ export default function Locations() {
         </MapContainer>
       </div>
 
-      {/* ─── Device List ───────────────────────────────────────────────────────── */}
       <div style={styles.listWrapper}>
         <h3 style={styles.listHeader}>Connected Devices</h3>
         {devicesToShow.length === 0 ? (
@@ -295,7 +287,7 @@ export default function Locations() {
                   alignItems: 'center',
                 }}
               >
-                <span style={styles.deviceName}>{device.id}</span>
+                <span style={styles.deviceName}>{device.name || device.id}</span>
                 <button
                   style={styles.viewButton}
                   onClick={() => {
@@ -314,9 +306,7 @@ export default function Locations() {
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────────────
-// 4) Styles Object
-// ────────────────────────────────────────────────────────────────────────────────
+// styles are same as your original file
 const styles = {
   container: {
     padding: '20px',
