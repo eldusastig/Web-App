@@ -16,9 +16,9 @@ import {
 import L from 'leaflet';
 import { FiMapPin } from 'react-icons/fi';
 import { DeviceContext } from '../DeviceContext';
-import { LocationContext } from '../LocationContext'; // <-- use the LocationContext
+import { LocationContext } from '../LocationContext'; // <-- ensure LocationProvider wraps app
 
-// icons (same as your original)
+// icons (same styling as before)
 const greenIcon = new L.Icon({
   iconUrl:
     'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
@@ -74,7 +74,6 @@ function PanToDevice({ selectedDeviceId, devicesToShow, userMovedMap }) {
     if (!selectedDeviceId || userMovedMap.current || !map) return;
     const device = devicesToShow.find((d) => d.id === selectedDeviceId);
     if (device && typeof device.lat === 'number' && typeof device.lon === 'number') {
-      // nice zoom level (15 is a street-level zoom). 80 in your previous code looked like a typo.
       map.setView([device.lat, device.lon], 15, { animate: true });
     }
   }, [selectedDeviceId, devicesToShow, map]);
@@ -83,8 +82,8 @@ function PanToDevice({ selectedDeviceId, devicesToShow, userMovedMap }) {
 }
 
 export default function Locations() {
-  const { devices: metaDevices } = useContext(DeviceContext); // metadata (may come from firebase or mqtt)
-  const { locations } = useContext(LocationContext); // authoritative lat/lon from LocationContext
+  const { devices: metaDevices } = useContext(DeviceContext); // optional metadata
+  const { locations } = useContext(LocationContext); // authoritative lat/lon
   const [selectedDeviceId, setSelectedDeviceId] = useState(null);
   const [deviceAddresses, setDeviceAddresses] = useState({});
   const [showFlooded, setShowFlooded] = useState(false);
@@ -92,7 +91,6 @@ export default function Locations() {
   const [showInactive, setShowInactive] = useState(false);
   const userMovedMap = useRef(false);
 
-  // build a quick lookup for metadata by id
   const metaById = useMemo(() => {
     const m = new Map();
     (metaDevices || []).forEach((d) => {
@@ -101,8 +99,6 @@ export default function Locations() {
     return m;
   }, [metaDevices]);
 
-  // Merge locations (positions) with metadata
-  // locations: [{id, lat, lon, lastSeen}, ...]
   const mergedDevices = useMemo(() => {
     const out = (locations || []).map((loc) => {
       const id = String(loc.id);
@@ -112,10 +108,9 @@ export default function Locations() {
         lat: Number(loc.lat),
         lon: Number(loc.lon),
         lastSeen: loc.lastSeen || null,
-        // metadata fallbacks
         flooded: meta.flooded ?? meta.flood ?? false,
-        binFull: meta.binFull ?? meta.bin_full ?? meta.fillPct ? (Number(meta.fillPct) >= 90) : (meta.binFull ?? false),
-        active: meta.active ?? meta.online ?? true, // assume active if no metadata yet
+        binFull: meta.binFull ?? meta.bin_full ?? (meta.fillPct ? (Number(meta.fillPct) >= 90) : false),
+        active: meta.active ?? meta.online ?? true,
         name: meta.name ?? meta.label ?? id,
         rawMeta: meta,
       };
@@ -123,25 +118,16 @@ export default function Locations() {
 
     if (process.env.NODE_ENV !== 'production') {
       console.debug('Locations: mergedDevices', out);
-      // Also show devices that have meta but no GPS (helpful for debugging)
       const metaWithoutLoc = (metaDevices || []).filter(md => md && md.id && !locations.find(l => String(l.id) === String(md.id)));
       if (metaWithoutLoc.length) console.debug('Locations: meta devices without GPS', metaWithoutLoc);
     }
     return out;
   }, [locations, metaById, metaDevices]);
 
-  // Apply filters (showFlooded / showBinFull / showInactive)
   const devicesToShow = useMemo(() => {
     return mergedDevices.filter((d) => {
-      // If ONLY “Inactive” is checked, show devices that are inactive
-      if (showInactive && !showFlooded && !showBinFull) {
-        return !d.active;
-      }
-      // If inactive not checked, drop inactive
-      if (!showInactive && !d.active) {
-        return false;
-      }
-      // If no flood/bin filters selected, include
+      if (showInactive && !showFlooded && !showBinFull) return !d.active;
+      if (!showInactive && !d.active) return false;
       if (!showFlooded && !showBinFull) return true;
       if (showFlooded && d.flooded) return true;
       if (showBinFull && d.binFull) return true;
@@ -149,14 +135,13 @@ export default function Locations() {
     });
   }, [mergedDevices, showFlooded, showBinFull, showInactive]);
 
-  // reverse‐geocode newly visible devices (cache results)
+  // reverse-geocode newly visible devices (cache results)
   useEffect(() => {
     devicesToShow.forEach((device) => {
       const { id, lat, lon } = device;
-      if (!lat || !lon) return;
-      if (deviceAddresses[id]) return; // already fetched
+      if (lat == null || lon == null) return;
+      if (deviceAddresses[id]) return;
       const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}`;
-      // throttle / polite usage: don't hammer OSM - you might want to add rate-limiting
       fetch(url)
         .then((res) => res.json())
         .then((data) => {
@@ -168,14 +153,11 @@ export default function Locations() {
           setDeviceAddresses((prev) => ({ ...prev, [id]: 'No address found' }));
         });
     });
-  }, [devicesToShow, deviceAddresses]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devicesToShow]); // don't pass deviceAddresses as dep to avoid infinite loop
 
-  // initial map center (use first visible device)
   const initialCenter = useMemo(() => {
-    if (devicesToShow.length > 0) {
-      return [devicesToShow[0].lat, devicesToShow[0].lon];
-    }
-    // fallback to a reasonable center if you prefer your city
+    if (devicesToShow.length > 0) return [devicesToShow[0].lat, devicesToShow[0].lon];
     return [0, 0];
   }, [devicesToShow]);
 
@@ -222,9 +204,7 @@ export default function Locations() {
           zoom={initialZoom}
           scrollWheelZoom={true}
           style={{ height: '400px', width: '100%' }}
-          whenCreated={() => {
-            userMovedMap.current = false;
-          }}
+          whenCreated={() => { userMovedMap.current = false; }}
         >
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
@@ -306,7 +286,7 @@ export default function Locations() {
   );
 }
 
-// styles are same as your original file
+// styles (same as original)
 const styles = {
   container: {
     padding: '20px',
