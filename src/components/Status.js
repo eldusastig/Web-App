@@ -1,13 +1,12 @@
-// src/components/Status.jsx
+// src/components/Status.jsx (MQTT-enabled)
 import React, { useContext, useState, useEffect, useRef, useCallback } from 'react';
+import mqtt from 'mqtt';
 import { MetricsContext } from '../MetricsContext';
-import { realtimeDB } from '../firebase2';
-import { ref as dbRef, remove, set } from 'firebase/database';
 import { FiTrash2, FiPlusCircle, FiWifi, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import { StyleSheet, css } from 'aphrodite';
 
 export default function Status() {
-  const { fullBinAlerts, floodRisks, activeDevices, devices, authReady } = useContext(MetricsContext);
+  const { fullBinAlerts, floodRisks, activeDevices, devices } = useContext(MetricsContext);
   const [deviceAddresses, setDeviceAddresses] = useState({});
 
   const fetchedAddrs = useRef(new Set());
@@ -25,6 +24,11 @@ export default function Status() {
   // inline confirm
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+
+  // MQTT client state
+  const clientRef = useRef(null);
+  const subListenersRef = useRef(new Map()); // map deviceId->handler for temporary log subscriptions
+  const [mqttConnected, setMqttConnected] = useState(false);
 
   const displayValue = (val) => (val === null || val === undefined ? 'Loading…' : val);
 
@@ -59,6 +63,43 @@ export default function Status() {
     return cleanup;
   }, [setupMediaListener]);
 
+  // MQTT connection
+  useEffect(() => {
+    const url = 'wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt';
+    const options = {
+      username: 'prototype',
+      password: 'Prototype1',
+      clean: true,
+      keepalive: 60,
+      reconnectPeriod: 2000,
+      clientId: 'status_' + Math.random().toString(16).substr(2, 8),
+    };
+
+    const client = mqtt.connect(url, options);
+    clientRef.current = client;
+
+    client.on('connect', () => {
+      console.log('Status: MQTT connected');
+      setMqttConnected(true);
+      // subscribe to retained meta in case you publish devices/{id}/meta
+      client.subscribe('devices/+/meta', { qos: 1 }, (err) => {
+        if (err) console.warn('Status: failed to subscribe devices/+/meta', err);
+      });
+    });
+
+    client.on('reconnect', () => setMqttConnected(false));
+    client.on('close', () => setMqttConnected(false));
+    client.on('offline', () => setMqttConnected(false));
+
+    client.on('error', (err) => console.error('Status MQTT error', err));
+
+    return () => {
+      try { client.end(true); } catch (e) {}
+      clientRef.current = null;
+      setMqttConnected(false);
+    };
+  }, []);
+
   // reverse geocode addresses (simple caching)
   useEffect(() => {
     devices.forEach((d) => {
@@ -85,7 +126,7 @@ export default function Status() {
   });
 
   // ---------------------------
-  // Normalization helpers
+  // Normalization helpers (unchanged)
   // ---------------------------
   function normalizeClasses(raw) {
     if (raw === undefined || raw === null) return null;
@@ -171,17 +212,18 @@ export default function Status() {
     try { return String(cls).trim() !== ''; } catch (e) { return false; }
   };
 
-  // For display we only want "Rubbish Detected" (no categories) or "None"
   const formatClasses = (log) => {
     if (!log) return null;
     return hasDetections(log) ? 'Rubbish Detected' : 'None';
   };
 
   // ---------------------------
-  // Logs loading (replace existing loadLogsForDevice)
+  // Logs loading (MQTT-backed)
   // ---------------------------
   const loadLogsForDevice = async (device) => {
     const id = device.id;
+    if (!id) return;
+
     // avoid duplicate fetches
     if (logsMap[id] || loadingLogs[id]) return;
 
@@ -192,58 +234,93 @@ export default function Status() {
       return;
     }
 
+    // If there's an API endpoint available, fallback to the original HTTP fetch
+    // (Keep this for environments that still provide /api/devices/:id/logs)
+    const tryHttpFetch = async () => {
+      try {
+        setLoadingLogs((m) => ({ ...m, [id]: true }));
+        setErrorLogs((m) => ({ ...m, [id]: null }));
+
+        const url = `/api/devices/${encodeURIComponent(id)}/logs`;
+        const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        if (res.status === 404) {
+          setLogsMap((m) => ({ ...m, [id]: [] }));
+          return true;
+        }
+        if (!res.ok) {
+          let body = '';
+          try { body = await res.text(); } catch (e) { body = '<unreadable>'; }
+          setErrorLogs((m) => ({ ...m, [id]: `Failed to load logs: ${res.status} ${res.statusText}` }));
+          console.error('[Status] HTTP logs fetch failed', res.status, body);
+          return false;
+        }
+        const json = await res.json();
+        const normalized = Array.isArray(json) ? json.map(normalizeLog).filter(Boolean) : [normalizeLog(json)].filter(Boolean);
+        setLogsMap((m) => ({ ...m, [id]: normalized }));
+        return true;
+      } catch (err) {
+        console.debug('[Status] HTTP logs fetch error, falling back to MQTT', err);
+        return false;
+      } finally {
+        setLoadingLogs((m) => ({ ...m, [id]: false }));
+      }
+    };
+
+    // Try HTTP first (if server still offers it). If it fails, fall back to MQTT subscription.
+    const httpSucceeded = await tryHttpFetch();
+    if (httpSucceeded) return;
+
+    // MQTT fallback: subscribe to recent detection topic for this device and collect a short window
+    const client = clientRef.current;
+    if (!client || !client.connected) {
+      setErrorLogs((m) => ({ ...m, [id]: 'MQTT not connected' }));
+      return;
+    }
+
     setLoadingLogs((m) => ({ ...m, [id]: true }));
     setErrorLogs((m) => ({ ...m, [id]: null }));
 
-    // helper to clamp long response bodies when logging
-    const truncate = (s, n = 300) => {
-      if (!s) return s;
-      if (s.length <= n) return s;
-      return s.slice(0, n) + '…';
+    const collected = [];
+    const topic = `esp32/${id}/sensor/detections`;
+
+    const handler = (t, message) => {
+      if (t !== topic) return;
+      const txt = (message || '').toString();
+      let payload = null;
+      try { payload = JSON.parse(txt); } catch (e) { payload = txt; }
+      collected.unshift(payload);
+      if (collected.length >= 50) {
+        // enough messages, stop early
+        client.removeListener('message', handler);
+        client.unsubscribe(topic);
+        const normalized = collected.map(normalizeLog).filter(Boolean);
+        setLogsMap((m) => ({ ...m, [id]: normalized }));
+        setLoadingLogs((m) => ({ ...m, [id]: false }));
+      }
     };
 
-    try {
-      const url = `/api/devices/${encodeURIComponent(id)}/logs`;
-      console.debug(`[Status] fetching logs for ${id}: ${url}`);
-
-      // include credentials if your API uses same-origin cookies; change/remove if not needed
-      const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-
-      // 404 => no logs (not an application error)
-      if (res.status === 404) {
-        setLogsMap((m) => ({ ...m, [id]: [] }));
-        setErrorLogs((m) => ({ ...m, [id]: null }));
-        return;
+    subListenersRef.current.set(id, handler);
+    client.on('message', handler);
+    client.subscribe(topic, { qos: 1 }, (err) => {
+      if (err) {
+        console.error('[Status] subscribe failed for', topic, err);
+        client.removeListener('message', handler);
+        setErrorLogs((m) => ({ ...m, [id]: 'Failed to subscribe for logs' }));
+        setLoadingLogs((m) => ({ ...m, [id]: false }));
       }
+    });
 
-      if (!res.ok) {
-        // try to read body for helpful debug info
-        let body = '';
-        try { body = await res.text(); } catch (e) { body = '<unreadable>'; }
-        console.error(`[Status] loadLogsForDevice ${id} failed: HTTP ${res.status} ${res.statusText} — ${truncate(body)}`);
-        setErrorLogs((m) => ({ ...m, [id]: `Failed to load logs: ${res.status} ${res.statusText}` }));
-        return;
-      }
-
-      // parse JSON safely
-      let json;
+    // stop collecting after 1.5s
+    setTimeout(() => {
       try {
-        json = await res.json();
-      } catch (e) {
-        const text = await res.text().catch(() => '<unreadable>');
-        console.error(`[Status] loadLogsForDevice ${id} — JSON parse failed, body: ${truncate(text)}`, e);
-        setErrorLogs((m) => ({ ...m, [id]: 'Failed to parse logs (invalid JSON)' }));
-        return;
-      }
-
-      const normalized = Array.isArray(json) ? json.map(normalizeLog).filter(Boolean) : [normalizeLog(json)].filter(Boolean);
+        client.removeListener('message', handler);
+        client.unsubscribe(topic);
+      } catch (e) {}
+      const normalized = collected.map(normalizeLog).filter(Boolean);
       setLogsMap((m) => ({ ...m, [id]: normalized }));
-    } catch (err) {
-      console.error(`[Status] loadLogsForDevice ${id} exception:`, err);
-      setErrorLogs((m) => ({ ...m, [id]: `Failed to load logs: ${err && err.message ? err.message : String(err)}` }));
-    } finally {
       setLoadingLogs((m) => ({ ...m, [id]: false }));
-    }
+      subListenersRef.current.delete(id);
+    }, 1500);
   };
 
   const parseTsInfo = (rawTs) => {
@@ -301,7 +378,6 @@ export default function Status() {
   const renderLogItem = (log, idx, device) => {
     if (!log) return null;
     const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
-    // show only high-level status: "Rubbish Detected" or "None"
     const classesLabel = hasDetections(log) ? 'Rubbish Detected' : 'None';
     return (
       <div key={idx} className={css(styles.logItem)}>
@@ -311,7 +387,7 @@ export default function Status() {
     );
   };
 
-  // delete handlers
+  // delete handlers (MQTT-backed)
   const startDelete = (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     setPendingDelete(deviceId);
@@ -324,19 +400,27 @@ export default function Status() {
 
   const performDelete = async (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-    if (!authReady) {
-      alert('Not authenticated yet. Please wait a moment and try again.');
+    const client = clientRef.current;
+    if (!client || !client.connected) {
+      alert('MQTT not connected. Please wait and try again.');
       setPendingDelete(null);
       return;
     }
+
     setDeleting(true);
     try {
-      await set(dbRef(realtimeDB, `deleted_devices/${deviceId}`), true);
-      await remove(dbRef(realtimeDB, `devices/${deviceId}`));
-      alert(`Device ${deviceId} permanently removed. It will not be recreated from MQTT messages.`);
+      // publish retained marker that services should honor to avoid re-creating the device
+      client.publish(`deleted_devices/${deviceId}`, 'true', { qos: 1, retain: true });
+      // also publish retained meta to mark device as deleted (optional, helps UIs that read devices/+/meta)
+      client.publish(`devices/${deviceId}/meta`, JSON.stringify({ deleted: true, deletedAt: Date.now() }), { qos: 1, retain: true });
+
+      // Optionally: remove retained meta for device topics to avoid automatic recreation
+      // e.g. client.publish(`devices/${deviceId}/meta`, '', { qos: 1, retain: true });
+
+      alert(`Device ${deviceId} marked deleted (MQTT message published). It should no longer be auto-created.`);
     } catch (err) {
-      console.error('[Status] Delete operation failed:', err);
-      alert(`Failed to delete device: ${err.message}`);
+      console.error('[Status] Delete publish failed:', err);
+      alert(`Failed to send delete message: ${err && err.message ? err.message : String(err)}`);
     } finally {
       setDeleting(false);
       setPendingDelete(null);
@@ -369,7 +453,7 @@ export default function Status() {
 
   // Device card for mobile/narrow screens
   const DeviceCard = ({ d }) => {
-    const isDisabled = boolish(d.disabled);
+    const isDisabled = boolish(d.disabled) || boolish(d.meta?.deleted) || boolish(d.deleted);
     const addr = d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—';
     const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0 ? d.logs.map(normalizeLog).filter(Boolean) : (logsMap[d.id] || []);
 
@@ -388,7 +472,7 @@ export default function Status() {
                 <button type="button" className={css(styles.cancelBtn)} onClick={(e) => cancelDelete(e)} disabled={deleting}>No</button>
               </div>
             ) : (
-              <button type="button" className={css(styles.deleteBtn)} onClick={(e) => startDelete(e, d.id)} disabled={!authReady || deleting} title={!authReady ? 'Waiting for auth...' : `Delete device ${d.id}`}>
+              <button type="button" className={css(styles.deleteBtn)} onClick={(e) => startDelete(e, d.id)} disabled={!mqttConnected || deleting} title={!mqttConnected ? 'Waiting for MQTT...' : `Delete device ${d.id}`}>
                 <FiTrash2 />
               </button>
             )}
@@ -490,7 +574,7 @@ export default function Status() {
               </thead>
               <tbody>
                 {filteredDevices.map((d) => {
-                  const isDisabled = boolish(d.disabled);
+                  const isDisabled = boolish(d.disabled) || boolish(d.meta?.deleted) || boolish(d.deleted);
                   const isExpanded = expandedDevice === d.id;
                   const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0 ? d.logs.map(normalizeLog).filter(Boolean) : (logsMap[d.id] || []);
 
@@ -520,7 +604,7 @@ export default function Status() {
                               <button type="button" className={css(styles.cancelBtn)} onClick={(e) => cancelDelete(e)} disabled={deleting}>No</button>
                             </div>
                           ) : (
-                            <button type="button" className={css(styles.deleteBtn)} onClick={(e) => startDelete(e, d.id)} disabled={!authReady || deleting} aria-disabled={!authReady || deleting} title={!authReady ? 'Waiting for auth...' : `Delete device ${d.id}`} data-test-delete={`delete-${d.id}`}>
+                            <button type="button" className={css(styles.deleteBtn)} onClick={(e) => startDelete(e, d.id)} disabled={!mqttConnected || deleting} aria-disabled={!mqttConnected || deleting} title={!mqttConnected ? 'Waiting for MQTT...' : `Delete device ${d.id}`} data-test-delete={`delete-${d.id}`}>
                               <FiTrash2 />
                             </button>
                           )}
@@ -586,7 +670,7 @@ export default function Status() {
   );
 }
 
-/* Widget + styles */
+/* Widget + styles (unchanged) */
 const Widget = ({ icon, title, value, onClick, isActive }) => (
   <div
     className={css(styles.widget, isActive ? styles.widgetActive : null)}
