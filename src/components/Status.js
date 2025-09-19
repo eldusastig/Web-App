@@ -171,31 +171,21 @@ export default function Status() {
     try { return String(cls).trim() !== ''; } catch (e) { return false; }
   };
 
+  // For display we only want "Rubbish Detected" (no categories) or "None"
   const formatClasses = (log) => {
     if (!log) return null;
-    const cls = log.classes;
-    if (!cls) return null;
-    if (Array.isArray(cls)) return cls.join(', ');
-    if (typeof cls === 'string') return cls;
-    if (typeof cls === 'object') {
-      const parts = [];
-      for (const [k, v] of Object.entries(cls)) {
-        if (typeof v === 'number') parts.push(`${k}(${v})`);
-        else parts.push(k);
-      }
-      return parts.join(', ');
-    }
-    return String(cls);
+    return hasDetections(log) ? 'Rubbish Detected' : 'None';
   };
 
   // ---------------------------
-  // Logs loading (FIXED)
+  // Logs loading (replace existing loadLogsForDevice)
   // ---------------------------
   const loadLogsForDevice = async (device) => {
     const id = device.id;
+    // avoid duplicate fetches
     if (logsMap[id] || loadingLogs[id]) return;
 
-    // If device already has logs embedded, normalize and use them.
+    // if logs are already embedded on the device object, use them
     if (Array.isArray(device.logs) && device.logs.length > 0) {
       const normalized = device.logs.map(normalizeLog).filter(Boolean);
       setLogsMap((m) => ({ ...m, [id]: normalized }));
@@ -205,7 +195,7 @@ export default function Status() {
     setLoadingLogs((m) => ({ ...m, [id]: true }));
     setErrorLogs((m) => ({ ...m, [id]: null }));
 
-    // small helper to truncate long bodies shown in UI
+    // helper to clamp long response bodies when logging
     const truncate = (s, n = 300) => {
       if (!s) return s;
       if (s.length <= n) return s;
@@ -215,38 +205,33 @@ export default function Status() {
     try {
       const url = `/api/devices/${encodeURIComponent(id)}/logs`;
       console.debug(`[Status] fetching logs for ${id}: ${url}`);
-      // Use same-origin credentials so cookies are sent when applicable.
+
+      // include credentials if your API uses same-origin cookies; change/remove if not needed
       const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
 
+      // 404 => no logs (not an application error)
+      if (res.status === 404) {
+        setLogsMap((m) => ({ ...m, [id]: [] }));
+        setErrorLogs((m) => ({ ...m, [id]: null }));
+        return;
+      }
+
       if (!res.ok) {
-        // read response text (best-effort) to include in error
+        // try to read body for helpful debug info
         let body = '';
-        try {
-          body = await res.text();
-        } catch (e) {
-          body = '<unreadable response body>';
-        }
-        const msg = `HTTP ${res.status} ${res.statusText}${body ? ` — ${truncate(body)}` : ''}`;
-        console.error(`[Status] loadLogsForDevice ${id} failed: ${msg}`);
-
-        // 404 -> treat as no logs rather than an error
-        if (res.status === 404) {
-          setLogsMap((m) => ({ ...m, [id]: [] }));
-          setErrorLogs((m) => ({ ...m, [id]: null }));
-          return;
-        }
-
+        try { body = await res.text(); } catch (e) { body = '<unreadable>'; }
+        console.error(`[Status] loadLogsForDevice ${id} failed: HTTP ${res.status} ${res.statusText} — ${truncate(body)}`);
         setErrorLogs((m) => ({ ...m, [id]: `Failed to load logs: ${res.status} ${res.statusText}` }));
         return;
       }
 
-      // Try JSON parse (safe)
+      // parse JSON safely
       let json;
       try {
         json = await res.json();
       } catch (e) {
         const text = await res.text().catch(() => '<unreadable>');
-        console.error(`[Status] loadLogsForDevice ${id} — JSON parse failed, body:`, truncate(text), e);
+        console.error(`[Status] loadLogsForDevice ${id} — JSON parse failed, body: ${truncate(text)}`, e);
         setErrorLogs((m) => ({ ...m, [id]: 'Failed to parse logs (invalid JSON)' }));
         return;
       }
