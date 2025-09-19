@@ -5,21 +5,22 @@ import { getDatabase } from 'firebase/database';
 
 const firebaseConfig = {
 
-  apiKey: "AIzaSyAdne2cQVkg1qANSfbFVQbYgw_gkbk_r-w",
+  apiKey: "AIzaSyDNRAlGi6IuUw2S9NL-0d7vmZbDfuGAeWI",
 
-  authDomain: "mqtt-database-239f3.firebaseapp.com",
+  authDomain: "mqtt-database-4c5ce.firebaseapp.com",
 
-  databaseURL: "https://mqtt-database-239f3-default-rtdb.asia-southeast1.firebasedatabase.app",
+  databaseURL: "https://mqtt-database-4c5ce-default-rtdb.asia-southeast1.firebasedatabase.app",
 
-  projectId: "mqtt-database-239f3",
+  projectId: "mqtt-database-4c5ce",
 
-  storageBucket: "mqtt-database-239f3.firebasestorage.app",
+  storageBucket: "mqtt-database-4c5ce.firebasestorage.app",
 
-  messagingSenderId: "381498661089",
+  messagingSenderId: "479417931412",
 
-  appId: "1:381498661089:web:f7f52b70ef29ed24b73fa0",
+  appId: "1:479417931412:web:fca043ea719a506e834681",
 
-  measurementId: "G-58T66X8VP3"
+  measurementId: "G-4BMG25HCRE"
+
 
 };
 const app = initializeApp(firebaseConfig);
@@ -32,4 +33,5 @@ signInAnonymously(auth).catch((error) => {
 });
 // ✅ Export for use in other files
 export { auth, realtimeDB };
+
 
