@@ -12,7 +12,7 @@ import mqtt from 'mqtt';
 // export const database = getDatabase(app);
 //
 // If your file exports a different name/path, adjust the import below.
-import { database } from './firebase3';
+import { database } from './firebase3.js';
 
 export const MetricsContext = createContext({
   fullBinAlerts: null,
@@ -469,5 +469,6 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
+
 
 
