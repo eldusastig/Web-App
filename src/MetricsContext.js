@@ -2,17 +2,13 @@
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 
-// IMPORT YOUR INITIALIZED DATABASE FROM YOUR SEPARATE FILE
-// Example of src/firebase.js that this file expects:
-//
-// import { initializeApp } from 'firebase/app';
-// import { getDatabase } from 'firebase/database';
-// const firebaseConfig = { /* your config */ };
-// const app = initializeApp(firebaseConfig);
-// export const database = getDatabase(app);
-//
-// If your file exports a different name/path, adjust the import below.
+// Import your initialized database from your separate file.
+// Adjust path/name if your firebase init file is elsewhere.
 import { database } from './firebase3.js';
+
+const DEBUG = true; // set false to reduce console noise in production
+
+if (DEBUG) console.debug('[MetricsContext] module loaded — database present?', !!database);
 
 export const MetricsContext = createContext({
   fullBinAlerts: null,
@@ -31,9 +27,9 @@ export const MetricsProvider = ({ children }) => {
   const presenceRef = useRef(new Map()); // Map<id, { online: boolean, lastSeen: number }>
   const devicesMapRef = useRef(new Map()); // Map<id, deviceObj>
 
-  // Prevent repeated DB requests per device for a single app run.
-  // If you want repeated refreshes, you can clear entries or add timestamps.
-  const fetchedMetaRef = useRef(new Set());
+  // meta fetch cache: Map<id, lastFetchTs>
+  const fetchedMetaTsRef = useRef(new Map());
+  const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes - will re-fetch after TTL
 
   const ACTIVE_CUTOFF_MS = 8000;
   const PRUNE_INTERVAL_MS = 2000;
@@ -216,6 +212,8 @@ export const MetricsProvider = ({ children }) => {
     const arr = Array.from(map.values()).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
     setDevices(arr);
 
+    if (DEBUG) console.debug('[MetricsContext] updateDeviceFromLog', sid, { lat: dev.lat, lon: dev.lon, fillPct: dev.fillPct, binFull: dev.binFull });
+
     return isNew;
   }
 
@@ -272,15 +270,16 @@ export const MetricsProvider = ({ children }) => {
       }
 
       // if still no candidate, return null (we'll ignore message)
+      if (DEBUG) console.debug('[MetricsContext] extractIdFromTopicAndPayload', { topic, candidate, payloadSample: payload && typeof payload === 'object' ? Object.keys(payload).slice(0,6) : payload });
       return candidate;
     }
 
     client.on('connect', () => {
-      console.log('✅ MQTT connected (mqtt-only metrics)');
+      console.log('✅ MQTT connected (metrics)');
       // Subscribe to esp32 topics — narrow if you can to avoid irrelevant topics
       client.subscribe('esp32/#', { qos: 1 }, (err) => {
         if (err) console.error('Subscribe esp32/# failed', err);
-        else console.log('Subscribed to esp32/#');
+        else if (DEBUG) console.debug('Subscribed to esp32/#');
       });
     });
 
@@ -292,8 +291,7 @@ export const MetricsProvider = ({ children }) => {
       const id = extractIdFromTopicAndPayload(topic, payload);
       if (!id) {
         // ignored: no valid device id found in topic or payload
-        // uncomment for debugging:
-        // console.debug(`Ignored MQTT message without valid id — topic="${topic}" payload="${txt.slice(0,200)}"`);
+        if (DEBUG) console.debug('[MetricsContext] Ignored MQTT message without valid id', { topic, sample: txt });
         return;
       }
 
@@ -360,38 +358,60 @@ export const MetricsProvider = ({ children }) => {
   }, [devices]);
 
   // -----------------------------
-  // Firebase: fetch metadata for devices that are inactive
+  // Firebase: fetch metadata for devices that are inactive (with timestamped cache)
   // -----------------------------
-  // We import db helpers lazily to avoid breaking if `database` is not provided.
-  // If you exported `database` from src/firebase.js, this will use it.
-  // Adjust `fetchDeviceMetaFromFirebase` path if your RTDB stores metadata elsewhere.
   async function fetchDeviceMetaFromFirebase(id) {
     if (!id) return null;
-    // avoid duplicate requests for same id in this run
-    if (fetchedMetaRef.current.has(id)) return null;
-    fetchedMetaRef.current.add(id);
 
-    if (!database) {
-      console.debug('[MetricsContext] no Firebase database instance available (skipping DB fetch).');
+    // check cache TTL
+    const lastTs = fetchedMetaTsRef.current.get(id);
+    if (lastTs && (Date.now() - lastTs) < CACHE_TTL_MS) {
+      if (DEBUG) console.debug('[MetricsContext] fetchDeviceMetaFromFirebase: cache hit, skipping fetch for', id);
       return null;
     }
+    // mark attempted fetch time immediately to avoid concurrent repeats
+    fetchedMetaTsRef.current.set(id, Date.now());
 
+    if (!database) {
+      // Try dynamic import of your firebase init module as a fallback
+      if (DEBUG) console.warn('[MetricsContext] no Firebase database instance available — attempting dynamic import of firebase3.js');
+      try {
+        const mod = await import('./firebase3.js');
+        // update local `database` reference if available in module (note: does not rebind the imported name)
+        const dynamicDb = mod.database || null;
+        if (!dynamicDb) {
+          if (DEBUG) console.warn('[MetricsContext] dynamic import returned no database instance');
+          return null;
+        }
+        // Use dynamicDb for this fetch
+        return await doDbFetch(dynamicDb, id);
+      } catch (err) {
+        console.error('[MetricsContext] dynamic import of firebase3.js failed', err);
+        return null;
+      }
+    }
+
+    // use statically imported database
+    return await doDbFetch(database, id);
+  }
+
+  // helper to perform the DB read
+  async function doDbFetch(dbInstance, id) {
     try {
-      // lazy-import db functions to avoid bundling issues if firebase not configured
       const { ref: dbRefFunc, get: dbGetFunc } = await import('firebase/database').then(m => ({ ref: m.ref, get: m.get }));
-
-      // adjust path to your RTDB layout; this assumes /devices/{id}/meta or /devices/{id}
-      // We'll try /devices/{id}/meta, then fallback to /devices/{id}.
       const path1 = `devices/${id}/meta`;
-      const snapshot1 = await dbGetFunc(dbRefFunc(database, path1));
+      const snapshot1 = await dbGetFunc(dbRefFunc(dbInstance, path1));
       if (snapshot1.exists()) {
+        if (DEBUG) console.debug('[MetricsContext] fetched meta from', path1, snapshot1.val());
         return snapshot1.val();
       }
       const path2 = `devices/${id}`;
-      const snapshot2 = await dbGetFunc(dbRefFunc(database, path2));
+      const snapshot2 = await dbGetFunc(dbRefFunc(dbInstance, path2));
       if (snapshot2.exists()) {
+        if (DEBUG) console.debug('[MetricsContext] fetched meta from', path2, snapshot2.val());
         return snapshot2.val();
       }
+      if (DEBUG) console.debug('[MetricsContext] no firebase meta for', id);
       return null;
     } catch (err) {
       console.error('[MetricsContext] Firebase fetch error for', id, err);
@@ -407,8 +427,8 @@ export const MetricsProvider = ({ children }) => {
       const id = d.id;
       // consider offline when both online and active flags are false/undefined
       const isOffline = !(d.online === true || d.active === true);
-      if (isOffline && !fetchedMetaRef.current.has(id)) {
-        // fetch once and merge
+      if (isOffline) {
+        // fetch once per TTL & merge
         fetchDeviceMetaFromFirebase(id).then((meta) => {
           if (!meta) return;
           const map = devicesMapRef.current;
@@ -455,6 +475,7 @@ export const MetricsProvider = ({ children }) => {
             map.set(String(id), dev);
             const arr = Array.from(map.values()).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
             setDevices(arr);
+            if (DEBUG) console.debug('[MetricsContext] merged DB metadata for offline device', id, { address: dev.address, fillPct: dev.fillPct, lat: dev.lat, lon: dev.lon });
           }
         }).catch((e) => {
           console.debug('[MetricsContext] fetchDeviceMetaFromFirebase failed for', id, e);
@@ -464,11 +485,8 @@ export const MetricsProvider = ({ children }) => {
   }, [devices]);
 
   return (
-    <MetricsContext.Provider value={{ fullBinAlerts, floodRisks, activeDevices, devices }}>
+    <MetricsContext.Provider value={{ fullBinAlerts, floodRisks, activeDevices, devices, pushDeviceLog }}>
       {children}
     </MetricsContext.Provider>
   );
 };
-
-
-
