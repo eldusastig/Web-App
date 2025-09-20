@@ -1,13 +1,12 @@
-// firebase3.js
+// firebase3.js (v9 modular)
+// Initializes Firebase app, Database and Auth. Signs in anonymously (dev/test) and logs status.
+// Safe to import from multiple modules — it will reuse existing app if already initialized.
 
-// Import the functions you need from the SDKs you need
 import { initializeApp, getApps } from "firebase/app";
 import { getDatabase } from "firebase/database";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+// Your web app's Firebase configuration (you provided this earlier)
 const firebaseConfig = {
   apiKey: "AIzaSyCPC5X4d4_gVvxa1805HypyiCBhZTvS6Lk",
   authDomain: "mqtt-firebase-46be7.firebaseapp.com",
@@ -19,29 +18,45 @@ const firebaseConfig = {
   measurementId: "G-P1267TGVCX"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// initialize or reuse existing app
+let app;
+if (!getApps().length) {
+  app = initializeApp(firebaseConfig);
+  console.debug('[firebase3] initializeApp: new app created');
+} else {
+  app = getApps()[0];
+  console.debug('[firebase3] initializeApp: using existing app');
+}
+
+// exports
 export const database = getDatabase(app);
+export const auth = getAuth(app);
 
-// Debug: confirm module ran and exported database
-try {
-  // Print whether firebase app(s) exist and if database is truthy
-  console.debug('[firebase3] initialized — getApps().length =', getApps().length, ', database present =', !!database);
-} catch (err) {
-  // If for some reason getApps or debug fails, still report basic info
-  console.debug('[firebase3] initialized — database present =', !!database, ', (getApps() unavailable)', err);
-}
+// sign in anonymously for dev/test (ignore if already signed in)
+signInAnonymously(auth)
+  .then(() => {
+    console.debug('[firebase3] signInAnonymously: request succeeded (check onAuthStateChanged for final user)');
+  })
+  .catch(err => {
+    // Common reasons: anonymous auth disabled in console, network issue
+    console.error('[firebase3] signInAnonymously failed', err && err.message ? err.message : err);
+  });
 
-// For quick debugging from the browser console (optional)
-if (typeof window !== 'undefined') {
-  try {
-    // Expose on window so you can inspect from devtools: `window.__FIRE_DB`
-    window.__FIRE_DB = database;
-    console.debug('[firebase3] window.__FIRE_DB set (for quick inspection)');
-  } catch (e) {
-    // ignore if not allowed
+// log auth state changes
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    console.debug('[firebase3] onAuthStateChanged -> signed in anonymously as uid=', user.uid);
+  } else {
+    console.debug('[firebase3] onAuthStateChanged -> signed out');
   }
-}
+});
 
-// Also provide default export to make dynamic imports easier
-export default database;
+// Final sanity log so you can confirm file executed and exports are present
+console.debug('[firebase3] module loaded — exports:', {
+  databasePresent: !!database,
+  authPresent: !!auth,
+  appName: app?.name ?? '(unknown)'
+});
+
+// Optionally export app if other modules want it
+export default app;
