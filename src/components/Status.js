@@ -54,7 +54,7 @@ export default function Status() {
     else if (mq.addListener) mq.addListener(handler);
     return () => {
       if (mq.removeEventListener) mq.removeEventListener('change', handler);
-      else if (mq.removeListener) mq.removeListener('change', handler);
+      else if (mq.removeListener) mq.removeListener(handler);
     };
   }, []);
 
@@ -283,11 +283,23 @@ export default function Status() {
     const collected = [];
     const topic = `esp32/${id}/sensor/detections`;
 
-    const handler = (t, message) => {
+    // NOTE: include `packet` arg so we can detect retained messages; log retain/qos for debugging
+    const handler = (t, message, packet) => {
       if (t !== topic) return;
       const txt = (message || '').toString();
+      // debug retained vs live messages
+      try {
+        console.debug('[Status MQTT] recv', t, 'retain=', !!(packet && packet.retain), 'qos=', packet ? packet.qos : '-', 'payload=', txt);
+      } catch (e) {
+        // ignore console errors
+      }
       let payload = null;
       try { payload = JSON.parse(txt); } catch (e) { payload = txt; }
+      // attach arrival info so normalizeLog may use it if needed
+      if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        payload.arrival = Date.now();
+        if (packet && packet.retain) payload._retained = true;
+      }
       collected.unshift(payload);
       if (collected.length >= 50) {
         // enough messages, stop early
@@ -501,7 +513,8 @@ export default function Status() {
             ) : deviceLogs.length > 0 ? (
               deviceLogs.map((l, i) => renderLogItem(l, i, d))
             ) : (
-              <div className={css(styles.noLogs)}>No logs available</div>
+              // If MQTT connected we are likely waiting for retained/fresh detection
+              <div className={css(styles.noLogs)}>{mqttConnected ? 'Waiting for detection topic…' : 'No logs available'}</div>
             )}
           </div>
         )}
@@ -629,7 +642,8 @@ export default function Status() {
                                   {deviceLogs.map((l, i) => renderLogItem(l, i, d))}
                                 </div>
                               ) : (
-                                <div className={css(styles.noLogs)}>No logs available</div>
+                                // show waiting message when MQTT is connected and we received no logs in the small capture window
+                                <div className={css(styles.noLogs)}>{mqttConnected ? 'Waiting for detection topic…' : 'No logs available'}</div>
                               )}
                             </div>
                           </td>
