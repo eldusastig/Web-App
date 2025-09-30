@@ -3,7 +3,7 @@
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 
-// Use the same Realtime DB instance as your other contexts (adjust import if needed)
+// Use the same Realtime DB instance as your other contexts
 import { database } from './firebase3';
 
 import { ref as dbRef, get as dbGet } from 'firebase/database';
@@ -12,6 +12,8 @@ export const LocationContext = createContext({ locations: [] });
 
 // Toggle verbose logs
 const DEBUG = true;
+
+if (DEBUG) console.debug('[Location] module loaded — database present?', !!database, 'database.app?', database && database.app ? database.app.name : 'no-app');
 
 // CACHE TTL for DB fallback (ms)
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -464,12 +466,22 @@ export const LocationProvider = ({ children }) => {
               const mLonRaw = metaNorm.lon ?? metaNorm.longitude ?? metaNorm.lng ?? null;
               const latN = Number(mLatRaw);
               const lonN = Number(mLonRaw);
-              if ((mLatRaw !== null && mLatRaw !== undefined && mLonRaw !== null && mLonRaw !== undefined)
-                  && (!Number.isFinite(d.lat) || !Number.isFinite(d.lon))) {
+
+              // NEW: If DB meta has numeric coords, always assign them (more robust)
+              if (mLatRaw !== null && mLatRaw !== undefined && mLonRaw !== null && mLonRaw !== undefined) {
                 if (Number.isFinite(latN) && Number.isFinite(lonN)) {
-                  d.lat = latN;
-                  d.lon = lonN;
-                  changed = true;
+                  // assign regardless of previous d.lat/d.lon values so we don't leave nulls
+                  if (d.lat !== latN || d.lon !== lonN) {
+                    d.lat = latN;
+                    d.lon = lonN;
+                    changed = true;
+                  } else {
+                    // even if equal, ensure typed numeric values are stored (avoid nulls/strings)
+                    d.lat = latN;
+                    d.lon = lonN;
+                    // mark changed so flushLocations will include it
+                    changed = true;
+                  }
                 }
               }
 
@@ -494,16 +506,14 @@ export const LocationProvider = ({ children }) => {
                 changed = true;
               }
 
+              // persist changes into the map; mark as fallback-used to avoid repeated fetches
+              d._usingDbFallback = true;
+              d._clearedForFallback = false;
+              map.set(id, d);
+
               if (changed) {
-                d._usingDbFallback = true;
-                d._clearedForFallback = false;
-                map.set(id, d);
                 if (DEBUG) console.debug('[Location] merged DB fallback meta into device', id, { lat: d.lat, lon: d.lon, address: d.address, fillPct: d.fillPct });
               } else {
-                // mark as attempted so we don't spin re-fetching useless meta repeatedly
-                d._usingDbFallback = true;
-                d._clearedForFallback = false;
-                map.set(id, d);
                 if (DEBUG) console.debug('[Location] DB fallback ran but nothing changed for', id, 'meta sample:', meta);
               }
               // helpful debug of the stored device object
@@ -533,6 +543,3 @@ export const LocationProvider = ({ children }) => {
     </LocationContext.Provider>
   );
 };
-
-
-
