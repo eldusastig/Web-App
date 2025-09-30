@@ -428,7 +428,12 @@ export const LocationProvider = ({ children }) => {
 
       // mark expired devices: set lat/lon null to indicate live loc gone
       map.forEach((d, id) => {
+        // === CHANGE: do NOT clear devices that are currently using DB fallback
         if (d.lastSeen && d.lastSeen < cutoff && (d.lat !== null || d.lon !== null)) {
+          if (d._usingDbFallback) {
+            if (DEBUG) console.debug('[Location] skipping clear for DB-fallbacked device', id);
+            return;
+          }
           d.lat = null;
           d.lon = null;
           d._clearedForFallback = true;
