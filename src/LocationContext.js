@@ -4,7 +4,7 @@ import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 
 // Use the same Realtime DB instance as your other contexts (adjust import if needed)
-import { realtimeDB as database } from './firebase';
+import { realtimeDB as database } from './firebase3.JS';
 
 import { ref as dbRef, get as dbGet } from 'firebase/database';
 
@@ -533,3 +533,4 @@ export const LocationProvider = ({ children }) => {
     </LocationContext.Provider>
   );
 };
+
