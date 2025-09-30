@@ -220,6 +220,62 @@ export const LocationProvider = ({ children }) => {
     }
   }
 
+  // --- Initial seed from Firebase: populate devicesMapRef with DB-only devices that have coords
+  useEffect(() => {
+    if (!database) {
+      if (DEBUG) console.debug('[Location] database not available for initial seed');
+      return;
+    }
+
+    let aborted = false;
+    (async () => {
+      try {
+        const snap = await dbGet(dbRef(database, 'devices'));
+        if (!snap.exists()) {
+          if (DEBUG) console.debug('[Location] no devices node found for initial seed');
+          return;
+        }
+        const obj = snap.val();
+        const now = Date.now();
+        let seeded = 0;
+        Object.keys(obj || {}).forEach(id => {
+          if (aborted) return;
+          const meta = obj[id];
+          const mLat = meta?.lat ?? meta?.latitude ?? meta?.lat_deg ?? null;
+          const mLon = meta?.lon ?? meta?.longitude ?? meta?.lng ?? null;
+          if (Number.isFinite(Number(mLat)) && Number.isFinite(Number(mLon))) {
+            const sid = String(id);
+            // don't overwrite an existing live entry
+            const existing = devicesMapRef.current.get(sid);
+            if (!existing || existing._usingDbFallback) {
+              devicesMapRef.current.set(sid, {
+                id: sid,
+                lat: Number(mLat),
+                lon: Number(mLon),
+                lastSeen: meta?.lastSeen ?? now,
+                address: meta?.address ?? null,
+                fillPct: (meta?.fillPct ?? meta?.fill_percent ?? null),
+                online: !!meta?.online,
+                _usingDbFallback: true,
+              });
+              seeded++;
+            }
+          }
+        });
+        if (seeded > 0) {
+          flushLocations();
+          if (DEBUG) console.debug('[Location] seeded devices from Firebase', seeded);
+        } else {
+          if (DEBUG) console.debug('[Location] no devices with coords to seed from Firebase');
+        }
+      } catch (e) {
+        console.warn('[Location] initial DB seed failed', e);
+      }
+    })();
+
+    return () => { aborted = true; };
+  }, [database]);
+
   // MQTT: listen and extract lat/lon messages
   useEffect(() => {
     const url = 'wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt';
@@ -402,4 +458,3 @@ export const LocationProvider = ({ children }) => {
     </LocationContext.Provider>
   );
 };
-
