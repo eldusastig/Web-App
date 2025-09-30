@@ -1,4 +1,7 @@
-import React from 'react'; 
+import React from 'react';
+import Slider from "react-slick";
+import "slick-carousel/slick/slick.css";  
+import "slick-carousel/slick/slick-theme.css";  
 
 const About = () => {
   const developers = [
@@ -8,6 +11,25 @@ const About = () => {
     { name: "Rens Españo", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Espano.png" },
     { name: "Justin Jello Repani", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Repani.png" },
   ];
+
+  const prototypeImages = [
+    "Ecotrack2.jpg",
+    "Ecotrack3.jpg",
+    "Ecotrack4.jpg",
+  ];
+
+  // Slider settings (Messenger-like)
+  const sliderSettings = {
+    dots: true,
+    infinite: true,
+    speed: 500,
+    slidesToShow: 1,
+    slidesToScroll: 1,
+    arrows: true,
+    autoplay: true,
+    autoplaySpeed: 3000,
+    swipe: true,
+  };
 
   return (
     <div style={styles.container}>
@@ -57,7 +79,13 @@ const About = () => {
       {/* Prototype Section */}
       <div style={styles.sectionHeader}>Prototype</div>
       <div style={styles.prototypeContainer}>
-        <img src="Ecotrack2.jpg" alt="Prototype" style={styles.prototypeImg} />
+        <Slider {...sliderSettings} style={{ width: "100%", maxWidth: "650px" }}>
+          {prototypeImages.map((img, index) => (
+            <div key={index}>
+              <img src={img} alt={`Prototype ${index + 1}`} style={styles.prototypeImg} />
+            </div>
+          ))}
+        </Slider>
       </div>
 
       {/* Extra CSS for hover effects */}
