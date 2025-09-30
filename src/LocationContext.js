@@ -3,7 +3,7 @@
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 
-// Import the shared firebase database instance (must be exported from src/firebase.js)
+// Import the shared firebase database instance (must be exported from src/firebase3)
 import { database } from './firebase3';
 
 import { ref as dbRef, get as dbGet } from 'firebase/database';
@@ -33,8 +33,8 @@ function parseLocationFromPayload(payload) {
   if (!payload) return null;
 
   if (typeof payload === 'object' && !Array.isArray(payload)) {
-    const possibleLatKeys = ['lat','latitude','Lat','Latitude','LAT'];
-    const possibleLonKeys = ['lon','lng','longitude','Lon','Longitude','LON','Lng'];
+    const possibleLatKeys = ['lat','latitude','Lat','Latitude','LAT','lat_deg'];
+    const possibleLonKeys = ['lon','lng','longitude','Lon','Longitude','LON','Lng','lon_deg'];
 
     let latVal = undefined, lonVal = undefined;
     for (const k of possibleLatKeys) if (Object.prototype.hasOwnProperty.call(payload, k)) { latVal = payload[k]; break; }
@@ -91,6 +91,55 @@ function parseLocationFromPayload(payload) {
   return null;
 }
 
+// Normalize any incoming meta/payload to ensure numeric lat/lon keys where possible.
+// Returns a shallow copy of obj with lat/lon numeric fields set (if available).
+function normalizeLatLonPayload(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  const out = { ...obj };
+
+  // Try direct keys and nested gps/location
+  const latCandidates = ['lat', 'latitude', 'lat_deg'];
+  const lonCandidates = ['lon', 'lng', 'longitude', 'lon_deg'];
+
+  let foundLat = null;
+  let foundLon = null;
+
+  for (const k of latCandidates) {
+    if (Object.prototype.hasOwnProperty.call(out, k)) {
+      foundLat = out[k];
+      break;
+    }
+  }
+  for (const k of lonCandidates) {
+    if (Object.prototype.hasOwnProperty.call(out, k)) {
+      foundLon = out[k];
+      break;
+    }
+  }
+
+  // nested gps object
+  if (foundLat === null && out.gps && typeof out.gps === 'object') {
+    for (const k of latCandidates) {
+      if (Object.prototype.hasOwnProperty.call(out.gps, k)) { foundLat = out.gps[k]; break; }
+    }
+  }
+  if (foundLon === null && out.gps && typeof out.gps === 'object') {
+    for (const k of lonCandidates) {
+      if (Object.prototype.hasOwnProperty.call(out.gps, k)) { foundLon = out.gps[k]; break; }
+    }
+  }
+
+  if (foundLat !== null && foundLon !== null) {
+    const parsed = normalizeLatLon(foundLat, foundLon);
+    if (parsed) {
+      out.lat = parsed.lat;
+      out.lon = parsed.lon;
+    }
+  }
+
+  return out;
+}
+
 export const LocationProvider = ({ children }) => {
   const [locations, setLocations] = useState([]);
   const clientRef = useRef(null);
@@ -109,6 +158,7 @@ export const LocationProvider = ({ children }) => {
   const RESERVED = new Set(['sensor', 'status', 'gps', 'devices', 'meta', 'deleted_devices', 'broadcast', 'mqtt']);
 
   function flushLocations() {
+    // Only include devices that have valid numeric lat & lon (no pins for missing coords)
     const arr = Array.from(devicesMapRef.current.values())
       .filter(d => Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon)))
       .map(d => ({
@@ -256,7 +306,7 @@ export const LocationProvider = ({ children }) => {
                 address: meta?.address ?? null,
                 fillPct: (meta?.fillPct ?? meta?.fill_percent ?? null),
                 online: !!meta?.online,
-                _usingDbFallback: true,
+                _usingDbFallback: true, // seed came from DB
               });
               seeded++;
             }
@@ -369,6 +419,8 @@ export const LocationProvider = ({ children }) => {
           d.lon = null;
           d._clearedForFallback = true;
           d.online = false;
+          // Allow fallback to re-run for this device (was blocking when seeded)
+          d._usingDbFallback = false;
           map.set(id, d);
           clearedAny = true;
           if (DEBUG) console.debug('[Location] device expired -> cleared live location', id);
@@ -388,14 +440,16 @@ export const LocationProvider = ({ children }) => {
         map.forEach((d, id) => {
           if (d._clearedForFallback && !d._usingDbFallback) {
             promises.push((async () => {
+              if (DEBUG) console.debug('[Location] attempting DB fallback for', id);
               const meta = await fetchDeviceMetaFromFirebase(id);
               if (!meta) return null;
 
               let changed = false;
 
-              // lat/lon from metadata
-              const mLat = meta.lat ?? meta.latitude ?? meta.lat_deg ?? null;
-              const mLon = meta.lon ?? meta.longitude ?? meta.lng ?? null;
+              // lat/lon from metadata — normalize using helper
+              const metaNorm = normalizeLatLonPayload(meta);
+              const mLat = metaNorm.lat ?? metaNorm.latitude ?? metaNorm.lat_deg ?? null;
+              const mLon = metaNorm.lon ?? metaNorm.longitude ?? metaNorm.lng ?? null;
               if ((mLat !== undefined && mLon !== undefined) && (!Number.isFinite(d.lat) || !Number.isFinite(d.lon))) {
                 const latN = Number(mLat);
                 const lonN = Number(mLon);
@@ -432,6 +486,12 @@ export const LocationProvider = ({ children }) => {
                 d._clearedForFallback = false;
                 map.set(id, d);
                 if (DEBUG) console.debug('[Location] merged DB fallback meta into device', id, { lat: d.lat, lon: d.lon, address: d.address, fillPct: d.fillPct });
+              } else {
+                // mark as attempted so we don't spin re-fetching useless meta repeatedly
+                d._usingDbFallback = true;
+                d._clearedForFallback = false;
+                map.set(id, d);
+                if (DEBUG) console.debug('[Location] DB fallback ran but nothing changed for', id);
               }
               return id;
             })());
