@@ -1,460 +1,384 @@
-// src/LocationContext.js
-// LocationContext with Firebase fallback and cache TTL
-import React, { createContext, useState, useEffect, useRef } from 'react';
-import mqtt from 'mqtt';
+// src/components/Locations.jsx
+import React, {
+  useContext,
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+} from 'react';
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  useMapEvents,
+} from 'react-leaflet';
+import L from 'leaflet';
+import { FiMapPin } from 'react-icons/fi';
+import { DeviceContext } from '../DeviceContext';
+import { LocationContext } from '../LocationContext';
 
-// Import the shared firebase database instance (must be exported from src/firebase.js)
-import { database } from './firebase3';
+// icons
+const greenIcon = new L.Icon({
+  iconUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+  shadowSize: [41, 41],
+  className: 'leaflet-marker-green',
+});
+const orangeIcon = new L.Icon({
+  iconUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+  shadowSize: [41, 41],
+  className: 'leaflet-marker-orange',
+});
+const redIcon = new L.Icon({
+  iconUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+  shadowSize: [41, 41],
+  className: 'leaflet-marker-red',
+});
+const grayIcon = new L.Icon({
+  iconUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowUrl:
+    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+  shadowSize: [41, 41],
+  className: 'leaflet-marker-gray',
+});
 
-import { ref as dbRef, get as dbGet } from 'firebase/database';
+function PanToDevice({ selectedDeviceId, devicesToShow, userMovedMap }) {
+  const map = useMapEvents({
+    dragstart: () => (userMovedMap.current = true),
+    zoomstart: () => (userMovedMap.current = true),
+  });
 
-export const LocationContext = createContext({ locations: [] });
-
-// Toggle verbose logs
-const DEBUG = true;
-
-// CACHE TTL for DB fallback (ms)
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
-// Helpers: normalization & parsing
-function normalizeLatLon(latRaw, lonRaw) {
-  const a = Number(latRaw);
-  const b = Number(lonRaw);
-  if (!isFinite(a) || !isFinite(b)) return null;
-
-  const latValid = Math.abs(a) <= 90;
-  const lonValid = Math.abs(b) <= 180;
-  const swappedLikely = (!latValid && Math.abs(b) <= 90);
-  if (swappedLikely) return { lat: b, lon: a };
-  return { lat: a, lon: b };
-}
-
-function parseLocationFromPayload(payload) {
-  if (!payload) return null;
-
-  if (typeof payload === 'object' && !Array.isArray(payload)) {
-    const possibleLatKeys = ['lat','latitude','Lat','Latitude','LAT'];
-    const possibleLonKeys = ['lon','lng','longitude','Lon','Longitude','LON','Lng'];
-
-    let latVal = undefined, lonVal = undefined;
-    for (const k of possibleLatKeys) if (Object.prototype.hasOwnProperty.call(payload, k)) { latVal = payload[k]; break; }
-    for (const k of possibleLonKeys) if (Object.prototype.hasOwnProperty.call(payload, k)) { lonVal = payload[k]; break; }
-
-    if (latVal !== undefined && lonVal !== undefined) {
-      const parsed = normalizeLatLon(latVal, lonVal);
-      if (parsed) return parsed;
+  useEffect(() => {
+    if (!selectedDeviceId || userMovedMap.current || !map) return;
+    const device = devicesToShow.find((d) => d.id === selectedDeviceId);
+    if (device && typeof device.lat === 'number' && typeof device.lon === 'number') {
+      map.setView([device.lat, device.lon], 15, { animate: true });
     }
-  }
-
-  if (typeof payload === 'string') {
-    const s = payload.trim();
-    const parts = s.split(/[ ,;|]+/).map(p => p.trim()).filter(Boolean);
-    if (parts.length >= 2) return normalizeLatLon(parts[0], parts[1]);
-    return null;
-  }
-
-  if (Array.isArray(payload)) {
-    if (payload.length >= 2) return normalizeLatLon(payload[0], payload[1]);
-    return null;
-  }
-
-  if (typeof payload === 'object') {
-    if (payload.gps && typeof payload.gps === 'object') {
-      const r = parseLocationFromPayload(payload.gps);
-      if (r) return r;
-    }
-    if (payload.location && typeof payload.location === 'object') {
-      const r = parseLocationFromPayload(payload.location);
-      if (r) return r;
-    }
-    if (payload.coords && typeof payload.coords === 'object') {
-      const r = parseLocationFromPayload(payload.coords);
-      if (r) return r;
-    }
-
-    const keys = Object.keys(payload);
-    for (let i = 0; i < keys.length; i++) {
-      const k = keys[i];
-      if (k.toLowerCase().includes('lat')) {
-        const lonKey = keys.find(kk => {
-          const s = kk.toLowerCase();
-          return s.includes('lon') || s.includes('lng') || s.includes('long');
-        });
-        if (lonKey && Object.prototype.hasOwnProperty.call(payload, lonKey)) {
-          const parsed = normalizeLatLon(payload[k], payload[lonKey]);
-          if (parsed) return parsed;
-        }
-      }
-    }
-  }
+  }, [selectedDeviceId, devicesToShow, map]);
 
   return null;
 }
 
-export const LocationProvider = ({ children }) => {
-  const [locations, setLocations] = useState([]);
-  const clientRef = useRef(null);
+export default function Locations() {
+  const { devices } = useContext(DeviceContext); // metadata
+  const { locations } = useContext(LocationContext); // lat/lon from LocationContext
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null);
+  const [deviceAddresses, setDeviceAddresses] = useState({});
+  const [showFlooded, setShowFlooded] = useState(false);
+  const [showBinFull, setShowBinFull] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
+  const userMovedMap = useRef(false);
 
-  // Mirrors the presence / device map pattern from your other contexts
-  const devicesMapRef = useRef(new Map()); // id -> device object { id, lat, lon, lastSeen, address, fillPct, online }
-  const presenceRef = useRef(new Map()); // id -> { online: boolean, lastSeen: number }
-
-  // map of id->lastFetchedTs to rate-limit DB fallback queries
-  const fetchedMetaRef = useRef(new Map()); // id -> timestamp
-
-  const ACTIVE_CUTOFF_MS = 10000;
-  const PRUNE_INTERVAL_MS = 3000;
-
-  const ID_REGEX = /^[a-zA-Z0-9_.-]{1,80}$/;
-  const RESERVED = new Set(['sensor', 'status', 'gps', 'devices', 'meta', 'deleted_devices', 'broadcast', 'mqtt']);
-
-  function flushLocations() {
-    const arr = Array.from(devicesMapRef.current.values())
-      .filter(d => Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon)))
-      .map(d => ({
-        id: d.id,
-        lat: Number(d.lat),
-        lon: Number(d.lon),
-        lastSeen: d.lastSeen,
-        address: d.address ?? null,
-        fillPct: d.fillPct ?? null,
-        _usingDbFallback: !!d._usingDbFallback,
-      }))
-      .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
-    setLocations(arr);
-    if (DEBUG) console.debug('[Location] flushLocations ->', arr);
-  }
-
-  function updateDeviceLocation(id, lat, lon) {
-    if (!id) return;
-    const sid = String(id);
-    const now = Date.now();
-    const map = devicesMapRef.current;
-    const prev = map.get(sid) || { id: sid, lat: null, lon: null, lastSeen: now, address: null, fillPct: null, online: true };
-    prev.lat = lat;
-    prev.lon = lon;
-    prev.lastSeen = now;
-    prev.online = true;
-    prev._usingDbFallback = false; // real-time message overrides fallback
-    map.set(sid, prev);
-
-    presenceRef.current.set(sid, { online: true, lastSeen: now });
-    setTimeout(() => { // defer flush to batch multiple incoming updates
-      flushLocations();
-    }, 0);
-
-    if (DEBUG) console.debug('[Location] updateDeviceLocation ->', sid, { lat, lon, lastSeen: now });
-  }
-
-  function extractIdFromTopicAndPayload(topic, payload) {
-    const parts = topic.split('/').filter(Boolean);
-    let candidate = null;
-
-    if (parts.length >= 2 && (parts[0] === 'esp32' || parts[0] === 'device' || parts[0] === 'devices')) {
-      candidate = parts[1];
-      if (typeof candidate === 'string') {
-        const low = candidate.toLowerCase();
-        if (RESERVED.has(low) || !ID_REGEX.test(candidate)) candidate = null;
-      } else candidate = null;
-    }
-
-    if (!candidate && payload && typeof payload === 'object') {
-      const idFields = ['id', 'deviceId', 'device_id', 'dev_id', 'node_id', 'name'];
-      for (const f of idFields) {
-        if (Object.prototype.hasOwnProperty.call(payload, f) && payload[f]) {
-          const v = String(payload[f]).trim();
-          if (ID_REGEX.test(v) && !RESERVED.has(v.toLowerCase())) {
-            candidate = v;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!candidate && parts.length >= 2 && parts[parts.length - 1].toLowerCase().includes('gps')) {
-      const cand = parts[parts.length - 2];
-      if (cand && typeof cand === 'string' && ID_REGEX.test(cand) && !RESERVED.has(cand.toLowerCase())) {
-        candidate = cand;
-      }
-    }
-
-    if (DEBUG) console.debug('[Location] extractIdFromTopicAndPayload', { topic, candidate, payloadSample: (payload && typeof payload === 'object') ? Object.keys(payload).slice(0,6) : payload });
-    return candidate;
-  }
-
-  // Fetch metadata from Firebase RTDB for a given device id.
-  // Tries /devices/{id}/meta then /devices/{id}. Merges address / lat / lon / fillPct.
-  async function fetchDeviceMetaFromFirebase(id) {
-    if (!id) return null;
-    if (!database) {
-      if (DEBUG) console.warn('[Location] Firebase DB not available — cannot fetch meta for', id);
-      return null;
-    }
-
-    const last = fetchedMetaRef.current.get(id);
-    if (last && (Date.now() - last) < CACHE_TTL_MS) {
-      if (DEBUG) console.debug('[Location] meta cached recently for', id);
-      return null;
-    }
-    // mark fetch time immediately to avoid duplicate concurrent fetches
-    fetchedMetaRef.current.set(id, Date.now());
-
-    try {
-      const path1 = `devices/${id}/meta`;
-      const snap1 = await dbGet(dbRef(database, path1));
-      if (snap1.exists()) {
-        if (DEBUG) console.debug('[Location] fetched meta from', path1, snap1.val());
-        return snap1.val();
-      }
-      const path2 = `devices/${id}`;
-      const snap2 = await dbGet(dbRef(database, path2));
-      if (snap2.exists()) {
-        if (DEBUG) console.debug('[Location] fetched meta from', path2, snap2.val());
-        return snap2.val();
-      }
-      if (DEBUG) console.debug('[Location] no firebase meta for', id);
-      return null;
-    } catch (err) {
-      console.error('[Location] Firebase fetch error for', id, err && err.message ? err.message : err);
-      return null;
-    }
-  }
-
-  // --- Initial seed from Firebase: populate devicesMapRef with DB-only devices that have coords
-  useEffect(() => {
-    if (!database) {
-      if (DEBUG) console.debug('[Location] database not available for initial seed');
-      return;
-    }
-
-    let aborted = false;
-    (async () => {
-      try {
-        const snap = await dbGet(dbRef(database, 'devices'));
-        if (!snap.exists()) {
-          if (DEBUG) console.debug('[Location] no devices node found for initial seed');
-          return;
-        }
-        const obj = snap.val();
-        const now = Date.now();
-        let seeded = 0;
-        Object.keys(obj || {}).forEach(id => {
-          if (aborted) return;
-          const meta = obj[id];
-          const mLat = meta?.lat ?? meta?.latitude ?? meta?.lat_deg ?? null;
-          const mLon = meta?.lon ?? meta?.longitude ?? meta?.lng ?? null;
-          if (Number.isFinite(Number(mLat)) && Number.isFinite(Number(mLon))) {
-            const sid = String(id);
-            // don't overwrite an existing live entry
-            const existing = devicesMapRef.current.get(sid);
-            if (!existing || existing._usingDbFallback) {
-              devicesMapRef.current.set(sid, {
-                id: sid,
-                lat: Number(mLat),
-                lon: Number(mLon),
-                lastSeen: meta?.lastSeen ?? now,
-                address: meta?.address ?? null,
-                fillPct: (meta?.fillPct ?? meta?.fill_percent ?? null),
-                online: !!meta?.online,
-                _usingDbFallback: true,
-              });
-              seeded++;
-            }
-          }
-        });
-        if (seeded > 0) {
-          flushLocations();
-          if (DEBUG) console.debug('[Location] seeded devices from Firebase', seeded);
-        } else {
-          if (DEBUG) console.debug('[Location] no devices with coords to seed from Firebase');
-        }
-      } catch (e) {
-        console.warn('[Location] initial DB seed failed', e);
-      }
-    })();
-
-    return () => { aborted = true; };
-  }, [database]);
-
-  // MQTT: listen and extract lat/lon messages
-  useEffect(() => {
-    const url = 'wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt';
-    const options = {
-      username: 'prototype',
-      password: 'Prototype1',
-      clean: true,
-      keepalive: 60,
-      reconnectPeriod: 2000,
-      clientId: 'locationctx_' + Math.random().toString(16).substr(2, 8),
-    };
-
-    const client = mqtt.connect(url, options);
-    clientRef.current = client;
-
-    client.on('connect', () => {
-      console.log('📍 LocationContext: MQTT connected');
-      client.subscribe('esp32/#', { qos: 1 }, (err) => { if (err) console.error('subscribe esp32/# failed', err); });
-      client.subscribe('esp32/+/gps', { qos: 1 }, (err) => { if (err) console.error('subscribe esp32/+/gps failed', err); });
-      client.subscribe('esp32/gps', { qos: 1 }, (err) => { if (err) console.error('subscribe esp32/gps failed', err); });
-      client.subscribe('devices/+/meta', { qos: 1 }, (err) => { if (err) console.error('subscribe devices/+/meta failed', err); });
-      client.subscribe('device/+/#', { qos: 1 }, (err) => { if (err) console.error('subscribe device/+/# failed', err); });
+  // quick lookup of metadata by id
+  const metaById = useMemo(() => {
+    const m = new Map();
+    (devices || []).forEach((d) => {
+      if (d && d.id) m.set(String(d.id), d);
     });
+    return m;
+  }, [devices]);
 
-    client.on('reconnect', () => { if (DEBUG) console.debug('📍 LocationContext: reconnecting...'); });
-    client.on('offline', () => { if (DEBUG) console.debug('📍 LocationContext: offline'); });
-
-    client.on('message', (topic, message) => {
-      try {
-        const txt = (message || '').toString();
-        if (DEBUG) console.debug('📍 MQTT message arrived', { topic, txt });
-
-        let parsed = null;
-        try { parsed = JSON.parse(txt); if (DEBUG) console.debug('📍 JSON parsed', parsed); }
-        catch (e) { if (DEBUG) console.debug('📍 JSON parse failed, keeping raw text'); parsed = txt; }
-
-        const payloadObject = (typeof parsed === 'object' && parsed !== null) ? parsed : null;
-        const id = extractIdFromTopicAndPayload(topic, payloadObject);
-
-        // If payload contains lat & lon and id, quick accept
-        if (payloadObject && Object.prototype.hasOwnProperty.call(payloadObject, 'lat') && Object.prototype.hasOwnProperty.call(payloadObject, 'lon')) {
-          const quickId = payloadObject.id ? String(payloadObject.id) : id;
-          if (quickId) {
-            const loc = parseLocationFromPayload(payloadObject);
-            if (loc) {
-              if (DEBUG) console.debug('📍 Quick accept (payload lat/lon present)', { topic, id: quickId, loc });
-              updateDeviceLocation(quickId, loc.lat, loc.lon);
-              return;
-            }
-          }
-        }
-
-        if (!id) {
-          if (DEBUG) console.warn('📍 Message ignored: no valid id extracted', { topic, sample: txt });
-          return;
-        }
-
-        const loc = parseLocationFromPayload(payloadObject || txt);
-        if (loc) {
-          if (DEBUG) console.debug('📍 Parsed location', { topic, id, loc });
-          updateDeviceLocation(id, loc.lat, loc.lon);
-          return;
-        } else {
-          if (DEBUG) console.warn('📍 Message had id but no parsable location', { topic, id, sample: txt });
-        }
-      } catch (err) {
-        console.error('📍 LocationContext onmessage error', err);
-      }
+  // merge authoritative locations with device metadata
+  const mergedDevices = useMemo(() => {
+    const out = (locations || []).map((loc) => {
+      const id = String(loc.id);
+      const meta = metaById.get(id) || {};
+      return {
+        id,
+        lat: Number(loc.lat),
+        lon: Number(loc.lon),
+        lastSeen: loc.lastSeen || null,
+        flooded: meta.flooded ?? meta.flood ?? false,
+        binFull: meta.binFull ?? meta.bin_full ?? (meta.fillPct ? (Number(meta.fillPct) >= 90) : false),
+        active: meta.active ?? meta.online ?? true,
+        name: meta.name ?? meta.label ?? id,
+        rawMeta: meta,
+      };
     });
+    // debug helpers
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug('Locations: mergedDevices', out);
+      const metaWithoutLoc = (devices || []).filter(md => md && md.id && !locations.find(l => String(l.id) === String(md.id)));
+      if (metaWithoutLoc.length) console.debug('Locations: meta devices without GPS', metaWithoutLoc);
+    }
+    return out;
+  }, [locations, metaById, devices]);
 
-    client.on('error', (err) => console.error('📍 LocationContext MQTT error', err));
+  // apply filters
+  const devicesToShow = useMemo(() => {
+    return mergedDevices.filter((d) => {
+      if (showInactive && !showFlooded && !showBinFull) return !d.active;
+      if (!showInactive && !d.active) return false;
+      if (!showFlooded && !showBinFull) return true;
+      if (showFlooded && d.flooded) return true;
+      if (showBinFull && d.binFull) return true;
+      return false;
+    });
+  }, [mergedDevices, showFlooded, showBinFull, showInactive]);
 
-    return () => {
-      try { client.end(true); } catch (e) {}
-      clientRef.current = null;
-    };
-  }, []);
+  // simple queue/throttle to avoid firing lots of requests at once
+  const fetchQueueRef = useRef(new Map()); // id -> promise flag
 
-  // Periodic prune: mark offline devices and attempt DB fallback merge for those IDs
   useEffect(() => {
-    const interval = setInterval(async () => {
-      const now = Date.now();
-      const cutoff = now - ACTIVE_CUTOFF_MS;
-      const map = devicesMapRef.current;
-      let clearedAny = false;
+    // For each visible device with coordinates and no cached address, fetch an address
+    devicesToShow.forEach((device, idx) => {
+      const { id, lat, lon } = device;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      if (deviceAddresses[id]) return; // already cached
 
-      // mark expired devices: set lat/lon null to indicate live loc gone
-      map.forEach((d, id) => {
-        if (d.lastSeen && d.lastSeen < cutoff && (d.lat !== null || d.lon !== null)) {
-          d.lat = null;
-          d.lon = null;
-          d._clearedForFallback = true;
-          d.online = false;
-          map.set(id, d);
-          clearedAny = true;
-          if (DEBUG) console.debug('[Location] device expired -> cleared live location', id);
-        }
-      });
+      // If a fetch is already pending for this id, skip
+      if (fetchQueueRef.current.get(id)) return;
 
-      // update presenceRef and devices state if presence changed
-      presenceRef.current.forEach((p, id) => {
-        if (p.lastSeen && p.lastSeen < cutoff && p.online) {
-          presenceRef.current.set(id, { online: false, lastSeen: p.lastSeen });
-        }
-      });
-
-      // Attempt DB fallback for cleared devices
-      if (clearedAny && database) {
-        const promises = [];
-        map.forEach((d, id) => {
-          if (d._clearedForFallback && !d._usingDbFallback) {
-            promises.push((async () => {
-              const meta = await fetchDeviceMetaFromFirebase(id);
-              if (!meta) return null;
-
-              let changed = false;
-
-              // lat/lon from metadata
-              const mLat = meta.lat ?? meta.latitude ?? meta.lat_deg ?? null;
-              const mLon = meta.lon ?? meta.longitude ?? meta.lng ?? null;
-              if ((mLat !== undefined && mLon !== undefined) && (!Number.isFinite(d.lat) || !Number.isFinite(d.lon))) {
-                const latN = Number(mLat);
-                const lonN = Number(mLon);
-                if (Number.isFinite(latN) && Number.isFinite(lonN)) {
-                  d.lat = latN;
-                  d.lon = lonN;
-                  changed = true;
-                }
-              }
-
-              // address fallback
-              const address = meta.address ?? meta.street_address ?? meta.display_name ?? meta.location_name ?? meta.name ?? null;
-              if (address && !d.address) {
-                d.address = address;
-                changed = true;
-              }
-
-              // fillPct fallback
-              const metaFill = meta.fillPct ?? meta.fill_pct ?? meta.binFillPct ?? meta.bin_fill_pct ?? meta.fill ?? meta.fillPercent ?? meta.fill_percent;
-              if (metaFill !== undefined && metaFill !== null && Number.isFinite(Number(metaFill)) && (d.fillPct === null || d.fillPct === undefined)) {
-                const pct = Math.max(0, Math.min(100, Math.round(Number(metaFill))));
-                d.fillPct = pct;
-                d.binFillPct = pct;
-                d.binFull = pct >= 90;
-                changed = true;
-              } else if ((meta.binFull === true || meta.bin_full === true) && (d.binFull !== true)) {
-                d.binFull = true;
-                d.binFillPct = d.binFillPct ?? 100;
-                changed = true;
-              }
-
-              if (changed) {
-                d._usingDbFallback = true;
-                d._clearedForFallback = false;
-                map.set(id, d);
-                if (DEBUG) console.debug('[Location] merged DB fallback meta into device', id, { lat: d.lat, lon: d.lon, address: d.address, fillPct: d.fillPct });
-              }
-              return id;
-            })());
-          }
-        });
-
+      // polite throttle: stagger requests by index (small delay)
+      fetchQueueRef.current.set(id, true);
+      const delayMs = Math.min(2000, idx * 300); // stagger, but cap at 2s
+      setTimeout(async () => {
         try {
-          await Promise.all(promises);
-        } catch (e) {
-          console.warn('[Location] error during DB fallback fetches', e);
+          // build correct URL using template literal (fixed!)
+          const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+          // Debug log
+          if (process.env.NODE_ENV !== 'production') console.debug('Reverse geocoding', id, { lat, lon, url });
+
+          // Nominatim is public and supports CORS; keep usage polite and cache results.
+          const res = await fetch(url, {
+            // do NOT attempt to set 'User-Agent' in browser JS; Nominatim will see a browser UA automatically.
+            headers: {
+              'Accept': 'application/json'
+            },
+          });
+          if (!res.ok) {
+            console.warn('Reverse geocode failed (http)', res.status, res.statusText);
+            setDeviceAddresses(prev => ({ ...prev, [id]: 'No address (HTTP ' + res.status + ')' }));
+          } else {
+            const data = await res.json();
+            const address = data.display_name || 'Unknown location';
+            setDeviceAddresses(prev => ({ ...prev, [id]: address }));
+          }
+        } catch (err) {
+          console.warn('Reverse geocode error for', id, err);
+          setDeviceAddresses(prev => ({ ...prev, [id]: 'No address found' }));
+        } finally {
+          fetchQueueRef.current.delete(id);
         }
-      }
+      }, delayMs);
+    });
+  }, [devicesToShow, deviceAddresses]);
 
-      // flush locations (will include DB fallback lat/lon if any merged)
-      flushLocations();
-    }, PRUNE_INTERVAL_MS);
+  const initialCenter = useMemo(() => {
+    if (devicesToShow.length > 0) return [devicesToShow[0].lat, devicesToShow[0].lon];
+    return [0, 0];
+  }, [devicesToShow]);
 
-    return () => clearInterval(interval);
-  }, []);
+  const initialZoom = useMemo(() => (devicesToShow.length > 0 ? 15 : 2), [devicesToShow]);
 
   return (
-    <LocationContext.Provider value={{ locations }}>
-      {children}
-    </LocationContext.Provider>
+    <div style={styles.container}>
+      <div style={styles.header}>
+        <FiMapPin /> Device Locations
+      </div>
+
+      <div style={styles.filterContainer}>
+        <label style={styles.filterLabel}>
+          <input
+            type="checkbox"
+            checked={showFlooded}
+            onChange={(e) => setShowFlooded(e.target.checked)}
+          />{' '}
+          Flooded
+        </label>
+
+        <label style={styles.filterLabel}>
+          <input
+            type="checkbox"
+            checked={showBinFull}
+            onChange={(e) => setShowBinFull(e.target.checked)}
+          />{' '}
+          Bin Full
+        </label>
+
+        <label style={styles.filterLabel}>
+          <input
+            type="checkbox"
+            checked={showInactive}
+            onChange={(e) => setShowInactive(e.target.checked)}
+          />{' '}
+          Inactive
+        </label>
+      </div>
+
+      <div style={styles.mapWrapper}>
+        <MapContainer
+          center={initialCenter}
+          zoom={initialZoom}
+          scrollWheelZoom={true}
+          style={{ height: '400px', width: '100%' }}
+          whenCreated={() => { userMovedMap.current = false; }}
+        >
+          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+          {devicesToShow.map((device) => {
+            const address = deviceAddresses[device.id];
+            let iconToUse = greenIcon;
+            if (device.flooded) iconToUse = redIcon;
+            else if (device.binFull) iconToUse = orangeIcon;
+            else if (!device.active) iconToUse = grayIcon;
+
+            return (
+              <Marker
+                key={device.id}
+                position={[device.lat, device.lon]}
+                icon={iconToUse}
+                eventHandlers={{ click: () => setSelectedDeviceId(device.id) }}
+              >
+                <Popup>
+                  <b>{device.name || device.id}</b>
+                  <br />
+                  {address ? address : `${device.lat.toFixed(6)}, ${device.lon.toFixed(6)}`}
+                  <br />
+                  Flooded: {device.flooded ? 'Yes' : 'No'}
+                  <br />
+                  Bin Full: {device.binFull ? 'Yes' : 'No'}
+                  <br />
+                  Active: {device.active ? 'Yes' : 'No'}
+                </Popup>
+              </Marker>
+            );
+          })}
+
+          <PanToDevice
+            selectedDeviceId={selectedDeviceId}
+            devicesToShow={devicesToShow}
+            userMovedMap={userMovedMap}
+          />
+        </MapContainer>
+      </div>
+
+      <div style={styles.listWrapper}>
+        <h3 style={styles.listHeader}>Connected Devices</h3>
+        {devicesToShow.length === 0 ? (
+          <p style={styles.emptyText}>No devices to show.</p>
+        ) : (
+          <ul style={styles.deviceList}>
+            {devicesToShow.map((device) => (
+              <li
+                key={device.id}
+                style={{
+                  ...styles.listItem,
+                  backgroundColor:
+                    device.id === selectedDeviceId ? '#EEF2F7' : 'white',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <span style={styles.deviceName}>{device.name || device.id}</span>
+                <button
+                  style={styles.viewButton}
+                  onClick={() => {
+                    userMovedMap.current = false;
+                    setSelectedDeviceId(device.id);
+                  }}
+                >
+                  📍 View
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
+}
+
+const styles = {
+  container: {
+    padding: '20px',
+    backgroundColor: '#fff',
+    borderRadius: '8px',
+    marginLeft: '30px',
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+  },
+  header: {
+    fontSize: '24px',
+    fontWeight: 'bold',
+    marginBottom: '12px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  filterContainer: {
+    marginBottom: '12px',
+    display: 'flex',
+    gap: '16px',
+    alignItems: 'center',
+  },
+  filterLabel: {
+    fontSize: '14px',
+    color: '#333',
+  },
+  mapWrapper: {
+    marginBottom: '16px',
+  },
+  listWrapper: {
+    maxHeight: '200px',
+    overflowY: 'auto',
+    borderTop: '1px solid #e2e8f0',
+    paddingTop: '12px',
+  },
+  listHeader: {
+    margin: '0 0 8px 0',
+    fontSize: '18px',
+    borderBottom: '1px solid #ccc',
+    paddingBottom: '4px',
+  },
+  deviceList: {
+    listStyleType: 'none',
+    padding: 0,
+    margin: 0,
+  },
+  listItem: {
+    padding: '8px 12px',
+    borderBottom: '1px solid #e2e8f0',
+    cursor: 'pointer',
+    color: 'black',
+  },
+  deviceName: {
+    fontWeight: '600',
+    color: 'black',
+  },
+  viewButton: {
+    backgroundColor: '#3182ce',
+    color: 'white',
+    border: 'none',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '0.8rem',
+  },
+  emptyText: {
+    color: '#777',
+    fontStyle: 'italic',
+  },
 };
