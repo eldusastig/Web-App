@@ -13,9 +13,9 @@ const About = () => {
   ];
 
   const prototypeImages = [
+    "Ecotrack1.jpg",
     "Ecotrack2.jpg",
     "Ecotrack3.jpg",
-    "Ecotrack4.jpg",
   ];
 
   // Slider settings (Messenger-like)
