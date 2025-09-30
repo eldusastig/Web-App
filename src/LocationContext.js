@@ -3,8 +3,8 @@
 import React, { createContext, useState, useEffect, useRef } from 'react';
 import mqtt from 'mqtt';
 
-// Import the shared firebase database instance (must be exported from src/firebase3)
-import { database } from './firebase3.js';
+// Use the same Realtime DB instance as your other contexts (adjust import if needed)
+import { realtimeDB as database } from './firebase';
 
 import { ref as dbRef, get as dbGet } from 'firebase/database';
 
@@ -20,7 +20,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 function normalizeLatLon(latRaw, lonRaw) {
   const a = Number(latRaw);
   const b = Number(lonRaw);
-  if (!isFinite(a) || !isFinite(b)) return null;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
 
   const latValid = Math.abs(a) <= 90;
   const lonValid = Math.abs(b) <= 180;
@@ -118,18 +118,18 @@ function normalizeLatLonPayload(obj) {
   }
 
   // nested gps object
-  if (foundLat === null && out.gps && typeof out.gps === 'object') {
+  if ((foundLat === null || foundLat === undefined) && out.gps && typeof out.gps === 'object') {
     for (const k of latCandidates) {
       if (Object.prototype.hasOwnProperty.call(out.gps, k)) { foundLat = out.gps[k]; break; }
     }
   }
-  if (foundLon === null && out.gps && typeof out.gps === 'object') {
+  if ((foundLon === null || foundLon === undefined) && out.gps && typeof out.gps === 'object') {
     for (const k of lonCandidates) {
       if (Object.prototype.hasOwnProperty.call(out.gps, k)) { foundLon = out.gps[k]; break; }
     }
   }
 
-  if (foundLat !== null && foundLon !== null) {
+  if (foundLat !== null && foundLat !== undefined && foundLon !== null && foundLon !== undefined) {
     const parsed = normalizeLatLon(foundLat, foundLon);
     if (parsed) {
       out.lat = parsed.lat;
@@ -160,9 +160,16 @@ export const LocationProvider = ({ children }) => {
   function flushLocations() {
     // Only include devices that have valid numeric lat & lon (no pins for missing coords)
     const arr = Array.from(devicesMapRef.current.values())
-      .filter(d => Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lon)))
+      // ensure lat/lon are present (not null/undefined) and numeric-finite after coercion
+      .filter(d =>
+        d.lat !== null && d.lat !== undefined &&
+        d.lon !== null && d.lon !== undefined &&
+        Number.isFinite(Number(d.lat)) &&
+        Number.isFinite(Number(d.lon))
+      )
       .map(d => ({
         id: d.id,
+        // use safe numeric conversion (we already ensured it's finite)
         lat: Number(d.lat),
         lon: Number(d.lon),
         lastSeen: d.lastSeen,
@@ -171,6 +178,7 @@ export const LocationProvider = ({ children }) => {
         _usingDbFallback: !!d._usingDbFallback,
       }))
       .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+
     setLocations(arr);
     if (DEBUG) console.debug('[Location] flushLocations ->', arr);
   }
@@ -291,17 +299,19 @@ export const LocationProvider = ({ children }) => {
         Object.keys(obj || {}).forEach(id => {
           if (aborted) return;
           const meta = obj[id];
-          const mLat = meta?.lat ?? meta?.latitude ?? meta?.lat_deg ?? null;
-          const mLon = meta?.lon ?? meta?.longitude ?? meta?.lng ?? null;
-          if (Number.isFinite(Number(mLat)) && Number.isFinite(Number(mLon))) {
+          const mLatRaw = meta?.lat ?? meta?.latitude ?? meta?.lat_deg ?? null;
+          const mLonRaw = meta?.lon ?? meta?.longitude ?? meta?.lng ?? null;
+          const latN = Number(mLatRaw);
+          const lonN = Number(mLonRaw);
+          if (Number.isFinite(latN) && Number.isFinite(lonN)) {
             const sid = String(id);
-            // don't overwrite an existing live entry
+            // don't overwrite an existing live entry (unless that entry itself was DB fallback)
             const existing = devicesMapRef.current.get(sid);
             if (!existing || existing._usingDbFallback) {
               devicesMapRef.current.set(sid, {
                 id: sid,
-                lat: Number(mLat),
-                lon: Number(mLon),
+                lat: latN,
+                lon: lonN,
                 lastSeen: meta?.lastSeen ?? now,
                 address: meta?.address ?? null,
                 fillPct: (meta?.fillPct ?? meta?.fill_percent ?? null),
@@ -310,6 +320,8 @@ export const LocationProvider = ({ children }) => {
               });
               seeded++;
             }
+          } else {
+            if (DEBUG) console.debug('[Location] seed skipped (no numeric coords) for', id, { mLatRaw, mLonRaw });
           }
         });
         if (seeded > 0) {
@@ -419,7 +431,7 @@ export const LocationProvider = ({ children }) => {
           d.lon = null;
           d._clearedForFallback = true;
           d.online = false;
-          // Allow fallback to re-run for this device (was blocking when seeded)
+          // Allow fallback to re-run for this device (fix: reset this so fallback will fetch DB meta)
           d._usingDbFallback = false;
           map.set(id, d);
           clearedAny = true;
@@ -448,11 +460,12 @@ export const LocationProvider = ({ children }) => {
 
               // lat/lon from metadata — normalize using helper
               const metaNorm = normalizeLatLonPayload(meta);
-              const mLat = metaNorm.lat ?? metaNorm.latitude ?? metaNorm.lat_deg ?? null;
-              const mLon = metaNorm.lon ?? metaNorm.longitude ?? metaNorm.lng ?? null;
-              if ((mLat !== undefined && mLon !== undefined) && (!Number.isFinite(d.lat) || !Number.isFinite(d.lon))) {
-                const latN = Number(mLat);
-                const lonN = Number(mLon);
+              const mLatRaw = metaNorm.lat ?? metaNorm.latitude ?? metaNorm.lat_deg ?? null;
+              const mLonRaw = metaNorm.lon ?? metaNorm.longitude ?? metaNorm.lng ?? null;
+              const latN = Number(mLatRaw);
+              const lonN = Number(mLonRaw);
+              if ((mLatRaw !== null && mLatRaw !== undefined && mLonRaw !== null && mLonRaw !== undefined)
+                  && (!Number.isFinite(d.lat) || !Number.isFinite(d.lon))) {
                 if (Number.isFinite(latN) && Number.isFinite(lonN)) {
                   d.lat = latN;
                   d.lon = lonN;
@@ -491,8 +504,10 @@ export const LocationProvider = ({ children }) => {
                 d._usingDbFallback = true;
                 d._clearedForFallback = false;
                 map.set(id, d);
-                if (DEBUG) console.debug('[Location] DB fallback ran but nothing changed for', id);
+                if (DEBUG) console.debug('[Location] DB fallback ran but nothing changed for', id, 'meta sample:', meta);
               }
+              // helpful debug of the stored device object
+              if (DEBUG) console.debug('[Location] device after merge', id, map.get(id));
               return id;
             })());
           }
@@ -518,4 +533,3 @@ export const LocationProvider = ({ children }) => {
     </LocationContext.Provider>
   );
 };
-
