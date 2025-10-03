@@ -1,4 +1,4 @@
-// src/components/Status.jsx (MQTT-enabled) — minimal fix: queue deletes while offline
+// src/components/Status.jsx (MQTT-enabled) — full file (queues publishes, clears retained topics, optional HTTP DELETE)
 import React, { useContext, useState, useEffect, useRef, useCallback } from 'react';
 import mqtt from 'mqtt';
 import { MetricsContext } from '../MetricsContext';
@@ -30,6 +30,17 @@ export default function Status() {
   const subListenersRef = useRef(new Map()); // map deviceId->handler for temporary log subscriptions
   const pendingPublishesRef = useRef([]);    // queue publishes while disconnected
   const [mqttConnected, setMqttConnected] = useState(false);
+
+  // topics to clear after deleting a device — templates with `{id}` placeholder
+  const CLEAR_TOPIC_TEMPLATES = [
+    'esp32/{id}/status',
+    'esp32/{id}/sensor/detections',
+    // add other topics your devices publish retained on as needed:
+    // 'esp32/{id}/sensor/heartbeat',
+    // 'devices/{id}/someOtherTopic',
+    // optionally clear devices/{id}/meta (uncomment if you want to remove meta retained too)
+    // 'devices/{id}/meta',
+  ];
 
   const displayValue = (val) => (val === null || val === undefined ? 'Loading…' : val);
 
@@ -412,7 +423,7 @@ export default function Status() {
     );
   };
 
-  // delete handlers (MQTT-backed) — minimal fix: queue when disconnected
+  // delete handlers (MQTT-backed) — minimal fix: queue when disconnected + clear retained topics + optional HTTP DELETE
   const startDelete = (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     setPendingDelete(deviceId);
@@ -430,27 +441,23 @@ export default function Status() {
     setDeleting(true);
     setPendingDelete(null);
 
-    const publishDelete = (topic, payload, opts) => {
+    const publishWithCallback = (topic, payload, opts) => {
       try {
         if (!client) {
-          // safety: if client is gone, queue instead
+          // queue for later if the client is missing
           pendingPublishesRef.current.push({ topic, payload, opts });
           console.debug('[Status] queued publish (client missing)', topic);
           return;
         }
         client.publish(topic, payload, opts, (err) => {
           if (err) {
-            console.error('[Status] Delete publish failed:', err);
-            alert(`Failed to send delete message: ${err.message || String(err)}`);
+            console.error('[Status] publish failed', topic, err);
           } else {
-            console.debug('[Status] Delete publish ok:', topic);
-            // user feedback (only for immediate publishes)
-            if (client.connected) alert(`Device ${deviceId} marked deleted (MQTT message published).`);
+            console.debug('[Status] publish ok', topic);
           }
         });
       } catch (err) {
-        console.error('[Status] publish exception:', err);
-        alert(`Failed to send delete message: ${err.message || String(err)}`);
+        console.error('[Status] publish exception', err);
       }
     };
 
@@ -461,23 +468,56 @@ export default function Status() {
 
       const opts = { qos: 1, retain: true };
 
+      // 1) If not connected, queue the delete marker(s); otherwise publish immediately
       if (!client) {
-        // no client object at all — queue it for later
         pendingPublishesRef.current.push({ topic: delTopic, payload: 'true', opts });
         pendingPublishesRef.current.push({ topic: metaTopic, payload: metaPayload, opts });
         console.debug('[Status] MQTT client missing; queued delete for', deviceId);
         alert(`MQTT offline — delete queued for device ${deviceId}. It will be sent when the dashboard reconnects.`);
       } else if (!client.connected) {
-        // client exists but not connected yet — queue
         pendingPublishesRef.current.push({ topic: delTopic, payload: 'true', opts });
         pendingPublishesRef.current.push({ topic: metaTopic, payload: metaPayload, opts });
         console.debug('[Status] MQTT not connected; queued delete for', deviceId);
         alert(`MQTT offline — delete queued for device ${deviceId}. It will be sent when the dashboard reconnects.`);
       } else {
-        // connected — send immediately
-        console.debug('[Status] publishing delete for', deviceId);
-        publishDelete(delTopic, 'true', opts);
-        publishDelete(metaTopic, metaPayload, opts);
+        // publish delete markers now
+        publishWithCallback(delTopic, 'true', opts);
+        publishWithCallback(metaTopic, metaPayload, opts);
+
+        // 2) Clear common retained topics for this device so broker won't re-send them
+        const clearTopics = CLEAR_TOPIC_TEMPLATES.map(t => t.replace(/\{id\}/g, deviceId));
+        clearTopics.forEach((t) => {
+          try {
+            client.publish(t, '', { qos: 1, retain: true }, (err) => {
+              if (err) console.error('[Status] failed to clear retained', t, err);
+              else console.debug('[Status] cleared retained topic', t);
+            });
+          } catch (err) {
+            console.error('[Status] publish exception while clearing', t, err);
+          }
+        });
+
+        // 3) Optionally: call a server API to delete the device in Firebase immediately
+        //    This is best-effort and requires a server-side endpoint that runs Firebase Admin SDK.
+        (async () => {
+          try {
+            const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, {
+              method: 'DELETE',
+              credentials: 'same-origin',
+              headers: { Accept: 'application/json' },
+            });
+            if (!res.ok) {
+              console.warn('[Status] HTTP delete returned', res.status);
+            } else {
+              console.debug('[Status] HTTP delete OK for', deviceId);
+            }
+          } catch (err) {
+            console.warn('[Status] HTTP delete error (ignored)', err);
+          }
+        })();
+
+        // user feedback (already published)
+        alert(`Device ${deviceId} marked deleted (MQTT message published).`);
       }
     } catch (err) {
       console.error('[Status] performDelete top-level error', err);
