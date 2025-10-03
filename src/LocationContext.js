@@ -31,6 +31,13 @@ function normalizeLatLon(latRaw, lonRaw) {
   return { lat: a, lon: b };
 }
 
+function isValidCoord(lat, lon) {
+  // strict numeric check (finite numbers within world bounds)
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return false;
+  return true;
+}
+
 function parseLocationFromPayload(payload) {
   if (!payload) return null;
 
@@ -162,13 +169,12 @@ export const LocationProvider = ({ children }) => {
   function flushLocations() {
     // Only include devices that have valid numeric lat & lon (no pins for missing coords)
     const arr = Array.from(devicesMapRef.current.values())
-      // ensure lat/lon are present (not null/undefined) and numeric-finite after coercion
-      .filter(d =>
-        d.lat !== null && d.lat !== undefined &&
-        d.lon !== null && d.lon !== undefined &&
-        Number.isFinite(Number(d.lat)) &&
-        Number.isFinite(Number(d.lon))
-      )
+      .filter(d => {
+        // keep only entries with numeric, finite coords within valid ranges
+        const latN = Number(d.lat);
+        const lonN = Number(d.lon);
+        return isValidCoord(latN, lonN);
+      })
       .map(d => ({
         id: d.id,
         // use safe numeric conversion (we already ensured it's finite)
@@ -191,8 +197,22 @@ export const LocationProvider = ({ children }) => {
     const now = Date.now();
     const map = devicesMapRef.current;
     const prev = map.get(sid) || { id: sid, lat: null, lon: null, lastSeen: now, address: null, fillPct: null, online: true };
-    prev.lat = lat;
-    prev.lon = lon;
+
+    // only accept valid numeric coords — otherwise leave the existing coords untouched
+    const parsed = normalizeLatLon(lat, lon);
+    if (!parsed) {
+      if (DEBUG) console.debug('[Location] updateDeviceLocation — incoming coords invalid, ignoring', { id: sid, lat, lon });
+      // still update lastSeen/presence but do not set invalid coords
+      prev.lastSeen = now;
+      prev.online = true;
+      map.set(sid, prev);
+      presenceRef.current.set(sid, { online: true, lastSeen: now });
+      setTimeout(flushLocations, 0);
+      return;
+    }
+
+    prev.lat = parsed.lat;
+    prev.lon = parsed.lon;
     prev.lastSeen = now;
     prev.online = true;
     prev._usingDbFallback = false; // real-time message overrides fallback
@@ -203,7 +223,7 @@ export const LocationProvider = ({ children }) => {
       flushLocations();
     }, 0);
 
-    if (DEBUG) console.debug('[Location] updateDeviceLocation ->', sid, { lat, lon, lastSeen: now });
+    if (DEBUG) console.debug('[Location] updateDeviceLocation ->', sid, { lat: parsed.lat, lon: parsed.lon, lastSeen: now });
   }
 
   function extractIdFromTopicAndPayload(topic, payload) {
@@ -305,7 +325,7 @@ export const LocationProvider = ({ children }) => {
           const mLonRaw = meta?.lon ?? meta?.longitude ?? meta?.lng ?? null;
           const latN = Number(mLatRaw);
           const lonN = Number(mLonRaw);
-          if (Number.isFinite(latN) && Number.isFinite(lonN)) {
+          if (isValidCoord(latN, lonN)) {
             const sid = String(id);
             // don't overwrite an existing live entry (unless that entry itself was DB fallback)
             const existing = devicesMapRef.current.get(sid);
