@@ -1,4 +1,4 @@
-// src/components/Status.jsx (MQTT-enabled)
+// src/components/Status.jsx (MQTT-enabled) — minimal fix: queue deletes while offline
 import React, { useContext, useState, useEffect, useRef, useCallback } from 'react';
 import mqtt from 'mqtt';
 import { MetricsContext } from '../MetricsContext';
@@ -28,6 +28,7 @@ export default function Status() {
   // MQTT client state
   const clientRef = useRef(null);
   const subListenersRef = useRef(new Map()); // map deviceId->handler for temporary log subscriptions
+  const pendingPublishesRef = useRef([]);    // queue publishes while disconnected
   const [mqttConnected, setMqttConnected] = useState(false);
 
   const displayValue = (val) => (val === null || val === undefined ? 'Loading…' : val);
@@ -85,6 +86,18 @@ export default function Status() {
       client.subscribe('devices/+/meta', { qos: 1 }, (err) => {
         if (err) console.warn('Status: failed to subscribe devices/+/meta', err);
       });
+
+      // flush any queued publishes we accumulated while offline
+      if (pendingPublishesRef.current.length > 0) {
+        console.debug('[Status] flushing', pendingPublishesRef.current.length, 'queued publishes');
+        pendingPublishesRef.current.forEach(({ topic, payload, opts }) => {
+          client.publish(topic, payload, opts, (err) => {
+            if (err) console.error('[Status] queued publish error', topic, err);
+            else console.debug('[Status] queued publish sent', topic);
+          });
+        });
+        pendingPublishesRef.current = [];
+      }
     });
 
     client.on('reconnect', () => setMqttConnected(false));
@@ -399,7 +412,7 @@ export default function Status() {
     );
   };
 
-  // delete handlers (MQTT-backed)
+  // delete handlers (MQTT-backed) — minimal fix: queue when disconnected
   const startDelete = (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     setPendingDelete(deviceId);
@@ -413,29 +426,64 @@ export default function Status() {
   const performDelete = async (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     const client = clientRef.current;
-    if (!client || !client.connected) {
-      alert('MQTT not connected. Please wait and try again.');
-      setPendingDelete(null);
-      return;
-    }
 
     setDeleting(true);
+    setPendingDelete(null);
+
+    const publishDelete = (topic, payload, opts) => {
+      try {
+        if (!client) {
+          // safety: if client is gone, queue instead
+          pendingPublishesRef.current.push({ topic, payload, opts });
+          console.debug('[Status] queued publish (client missing)', topic);
+          return;
+        }
+        client.publish(topic, payload, opts, (err) => {
+          if (err) {
+            console.error('[Status] Delete publish failed:', err);
+            alert(`Failed to send delete message: ${err.message || String(err)}`);
+          } else {
+            console.debug('[Status] Delete publish ok:', topic);
+            // user feedback (only for immediate publishes)
+            if (client.connected) alert(`Device ${deviceId} marked deleted (MQTT message published).`);
+          }
+        });
+      } catch (err) {
+        console.error('[Status] publish exception:', err);
+        alert(`Failed to send delete message: ${err.message || String(err)}`);
+      }
+    };
+
     try {
-      // publish retained marker that services should honor to avoid re-creating the device
-      client.publish(`deleted_devices/${deviceId}`, 'true', { qos: 1, retain: true });
-      // also publish retained meta to mark device as deleted (optional, helps UIs that read devices/+/meta)
-      client.publish(`devices/${deviceId}/meta`, JSON.stringify({ deleted: true, deletedAt: Date.now() }), { qos: 1, retain: true });
+      const metaTopic = `devices/${deviceId}/meta`;
+      const delTopic = `deleted_devices/${deviceId}`;
+      const metaPayload = JSON.stringify({ deleted: true, deletedAt: Date.now() });
 
-      // Optionally: remove retained meta for device topics to avoid automatic recreation
-      // e.g. client.publish(`devices/${deviceId}/meta`, '', { qos: 1, retain: true });
+      const opts = { qos: 1, retain: true };
 
-      alert(`Device ${deviceId} marked deleted (MQTT message published). It should no longer be auto-created.`);
+      if (!client) {
+        // no client object at all — queue it for later
+        pendingPublishesRef.current.push({ topic: delTopic, payload: 'true', opts });
+        pendingPublishesRef.current.push({ topic: metaTopic, payload: metaPayload, opts });
+        console.debug('[Status] MQTT client missing; queued delete for', deviceId);
+        alert(`MQTT offline — delete queued for device ${deviceId}. It will be sent when the dashboard reconnects.`);
+      } else if (!client.connected) {
+        // client exists but not connected yet — queue
+        pendingPublishesRef.current.push({ topic: delTopic, payload: 'true', opts });
+        pendingPublishesRef.current.push({ topic: metaTopic, payload: metaPayload, opts });
+        console.debug('[Status] MQTT not connected; queued delete for', deviceId);
+        alert(`MQTT offline — delete queued for device ${deviceId}. It will be sent when the dashboard reconnects.`);
+      } else {
+        // connected — send immediately
+        console.debug('[Status] publishing delete for', deviceId);
+        publishDelete(delTopic, 'true', opts);
+        publishDelete(metaTopic, metaPayload, opts);
+      }
     } catch (err) {
-      console.error('[Status] Delete publish failed:', err);
-      alert(`Failed to send delete message: ${err && err.message ? err.message : String(err)}`);
+      console.error('[Status] performDelete top-level error', err);
+      alert(`Unexpected error: ${err && err.message ? err.message : String(err)}`);
     } finally {
       setDeleting(false);
-      setPendingDelete(null);
     }
   };
 
@@ -484,7 +532,7 @@ export default function Status() {
                 <button type="button" className={css(styles.cancelBtn)} onClick={(e) => cancelDelete(e)} disabled={deleting}>No</button>
               </div>
             ) : (
-              <button type="button" className={css(styles.deleteBtn)} onClick={(e) => startDelete(e, d.id)} disabled={!mqttConnected || deleting} title={!mqttConnected ? 'Waiting for MQTT...' : `Delete device ${d.id}`}>
+              <button type="button" className={css(styles.deleteBtn)} onClick={(e) => startDelete(e, d.id)} disabled={deleting} title={deleting ? 'Deleting…' : `Delete device ${d.id}`}>
                 <FiTrash2 />
               </button>
             )}
@@ -617,7 +665,7 @@ export default function Status() {
                               <button type="button" className={css(styles.cancelBtn)} onClick={(e) => cancelDelete(e)} disabled={deleting}>No</button>
                             </div>
                           ) : (
-                            <button type="button" className={css(styles.deleteBtn)} onClick={(e) => startDelete(e, d.id)} disabled={!mqttConnected || deleting} aria-disabled={!mqttConnected || deleting} title={!mqttConnected ? 'Waiting for MQTT...' : `Delete device ${d.id}`} data-test-delete={`delete-${d.id}`}>
+                            <button type="button" className={css(styles.deleteBtn)} onClick={(e) => startDelete(e, d.id)} disabled={deleting} aria-disabled={deleting} title={deleting ? 'Deleting…' : `Delete device ${d.id}`} data-test-delete={`delete-${d.id}`}>
                               <FiTrash2 />
                             </button>
                           )}
