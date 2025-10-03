@@ -1,4 +1,4 @@
-// src/components/Status.jsx (MQTT-enabled) — full file (queues publishes, clears retained topics, optional HTTP DELETE)
+// src/components/Status.jsx (MQTT-enabled) — fixed delete flow (waits for publishes, clears retained topics, HTTP delete fire-and-forget)
 import React, { useContext, useState, useEffect, useRef, useCallback } from 'react';
 import mqtt from 'mqtt';
 import { MetricsContext } from '../MetricsContext';
@@ -21,7 +21,7 @@ export default function Status() {
   // responsive
   const [isNarrow, setIsNarrow] = useState(false);
 
-  // inline confirm
+  // inline confirm & deleting state
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -35,11 +35,7 @@ export default function Status() {
   const CLEAR_TOPIC_TEMPLATES = [
     'esp32/{id}/status',
     'esp32/{id}/sensor/detections',
-    // add other topics your devices publish retained on as needed:
-    // 'esp32/{id}/sensor/heartbeat',
-    // 'devices/{id}/someOtherTopic',
-    // optionally clear devices/{id}/meta (uncomment if you want to remove meta retained too)
-    // 'devices/{id}/meta',
+    // add other topics your devices publish retained on as needed
   ];
 
   const displayValue = (val) => (val === null || val === undefined ? 'Loading…' : val);
@@ -93,12 +89,12 @@ export default function Status() {
     client.on('connect', () => {
       console.log('Status: MQTT connected');
       setMqttConnected(true);
-      // subscribe to retained meta in case you publish devices/{id}/meta
+      // subscribe to retained meta
       client.subscribe('devices/+/meta', { qos: 1 }, (err) => {
         if (err) console.warn('Status: failed to subscribe devices/+/meta', err);
       });
 
-      // flush any queued publishes we accumulated while offline
+      // flush queued publishes
       if (pendingPublishesRef.current.length > 0) {
         console.debug('[Status] flushing', pendingPublishesRef.current.length, 'queued publishes');
         pendingPublishesRef.current.forEach(({ topic, payload, opts }) => {
@@ -258,8 +254,7 @@ export default function Status() {
       return;
     }
 
-    // If there's an API endpoint available, fallback to the original HTTP fetch
-    // (Keep this for environments that still provide /api/devices/:id/logs)
+    // HTTP first, then MQTT fallback (unchanged)
     const tryHttpFetch = async () => {
       try {
         setLoadingLogs((m) => ({ ...m, [id]: true }));
@@ -290,11 +285,10 @@ export default function Status() {
       }
     };
 
-    // Try HTTP first (if server still offers it). If it fails, fall back to MQTT subscription.
     const httpSucceeded = await tryHttpFetch();
     if (httpSucceeded) return;
 
-    // MQTT fallback: subscribe to recent detection topic for this device and collect a short window
+    // MQTT fallback (unchanged)
     const client = clientRef.current;
     if (!client || !client.connected) {
       setErrorLogs((m) => ({ ...m, [id]: 'MQTT not connected' }));
@@ -307,26 +301,20 @@ export default function Status() {
     const collected = [];
     const topic = `esp32/${id}/sensor/detections`;
 
-    // NOTE: include `packet` arg so we can detect retained messages; log retain/qos for debugging
     const handler = (t, message, packet) => {
       if (t !== topic) return;
       const txt = (message || '').toString();
-      // debug retained vs live messages
       try {
         console.debug('[Status MQTT] recv', t, 'retain=', !!(packet && packet.retain), 'qos=', packet ? packet.qos : '-', 'payload=', txt);
-      } catch (e) {
-        // ignore console errors
-      }
+      } catch (e) {}
       let payload = null;
       try { payload = JSON.parse(txt); } catch (e) { payload = txt; }
-      // attach arrival info so normalizeLog may use it if needed
       if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
         payload.arrival = Date.now();
         if (packet && packet.retain) payload._retained = true;
       }
       collected.unshift(payload);
       if (collected.length >= 50) {
-        // enough messages, stop early
         client.removeListener('message', handler);
         client.unsubscribe(topic);
         const normalized = collected.map(normalizeLog).filter(Boolean);
@@ -346,7 +334,6 @@ export default function Status() {
       }
     });
 
-    // stop collecting after 1.5s
     setTimeout(() => {
       try {
         client.removeListener('message', handler);
@@ -423,7 +410,35 @@ export default function Status() {
     );
   };
 
-  // delete handlers (MQTT-backed) — minimal fix: queue when disconnected + clear retained topics + optional HTTP DELETE
+  // Helper: wrap client.publish in a Promise (resolves on callback)
+  const publishPromise = (topic, payload, opts = {}) => {
+    const client = clientRef.current;
+    if (!client) {
+      // queue for later
+      pendingPublishesRef.current.push({ topic, payload, opts });
+      console.debug('[Status] queued publish (no client)', topic);
+      return Promise.resolve({ queued: true });
+    }
+    return new Promise((resolve, reject) => {
+      try {
+        client.publish(topic, payload, opts, (err) => {
+          if (err) {
+            console.error('[Status] publish error for', topic, err);
+            return reject(err);
+          }
+          console.debug('[Status] publish ok', topic);
+          return resolve({ queued: false });
+        });
+      } catch (e) {
+        console.error('[Status] publish exception for', topic, e);
+        // fallback -> queue
+        pendingPublishesRef.current.push({ topic, payload, opts });
+        return resolve({ queued: true });
+      }
+    });
+  };
+
+  // delete handlers (MQTT-backed) — improved: await publishes, clear retained topics, don't block UI on HTTP
   const startDelete = (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     setPendingDelete(deviceId);
@@ -436,69 +451,38 @@ export default function Status() {
 
   const performDelete = async (e, deviceId) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-    const client = clientRef.current;
+    if (!deviceId) return;
 
     setDeleting(true);
-    setPendingDelete(null);
-
-    const publishWithCallback = (topic, payload, opts) => {
-      try {
-        if (!client) {
-          // queue for later if the client is missing
-          pendingPublishesRef.current.push({ topic, payload, opts });
-          console.debug('[Status] queued publish (client missing)', topic);
-          return;
-        }
-        client.publish(topic, payload, opts, (err) => {
-          if (err) {
-            console.error('[Status] publish failed', topic, err);
-          } else {
-            console.debug('[Status] publish ok', topic);
-          }
-        });
-      } catch (err) {
-        console.error('[Status] publish exception', err);
-      }
-    };
+    // keep pendingDelete visible until operation finishes so user sees it's in progress
 
     try {
-      const metaTopic = `devices/${deviceId}/meta`;
       const delTopic = `deleted_devices/${deviceId}`;
+      const metaTopic = `devices/${deviceId}/meta`;
       const metaPayload = JSON.stringify({ deleted: true, deletedAt: Date.now() });
-
       const opts = { qos: 1, retain: true };
 
-      // 1) If not connected, queue the delete marker(s); otherwise publish immediately
-      if (!client) {
+      const client = clientRef.current;
+
+      // If client is missing or disconnected, queue the publishes and inform the user.
+      if (!client || !client.connected) {
         pendingPublishesRef.current.push({ topic: delTopic, payload: 'true', opts });
         pendingPublishesRef.current.push({ topic: metaTopic, payload: metaPayload, opts });
-        console.debug('[Status] MQTT client missing; queued delete for', deviceId);
-        alert(`MQTT offline — delete queued for device ${deviceId}. It will be sent when the dashboard reconnects.`);
-      } else if (!client.connected) {
-        pendingPublishesRef.current.push({ topic: delTopic, payload: 'true', opts });
-        pendingPublishesRef.current.push({ topic: metaTopic, payload: metaPayload, opts });
-        console.debug('[Status] MQTT not connected; queued delete for', deviceId);
+        console.debug('[Status] MQTT offline — queued delete for', deviceId);
         alert(`MQTT offline — delete queued for device ${deviceId}. It will be sent when the dashboard reconnects.`);
       } else {
-        // publish delete markers now
-        publishWithCallback(delTopic, 'true', opts);
-        publishWithCallback(metaTopic, metaPayload, opts);
+        // publish delete marker + meta and wait for each to finish
+        await publishPromise(delTopic, 'true', opts);
+        await publishPromise(metaTopic, metaPayload, opts);
 
-        // 2) Clear common retained topics for this device so broker won't re-send them
+        // clear retained topics (empty payload with retain:true)
         const clearTopics = CLEAR_TOPIC_TEMPLATES.map(t => t.replace(/\{id\}/g, deviceId));
-        clearTopics.forEach((t) => {
-          try {
-            client.publish(t, '', { qos: 1, retain: true }, (err) => {
-              if (err) console.error('[Status] failed to clear retained', t, err);
-              else console.debug('[Status] cleared retained topic', t);
-            });
-          } catch (err) {
-            console.error('[Status] publish exception while clearing', t, err);
-          }
-        });
+        // perform in parallel but wait for completion to give clearer log/diagnostics
+        await Promise.allSettled(
+          clearTopics.map(t => publishPromise(t, '', { qos: 1, retain: true }))
+        );
 
-        // 3) Optionally: call a server API to delete the device in Firebase immediately
-        //    This is best-effort and requires a server-side endpoint that runs Firebase Admin SDK.
+        // attempt HTTP delete asynchronously (do not block UI). This is fire-and-forget.
         (async () => {
           try {
             const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, {
@@ -516,14 +500,17 @@ export default function Status() {
           }
         })();
 
-        // user feedback (already published)
-        alert(`Device ${deviceId} marked deleted (MQTT message published).`);
+        alert(`Device ${deviceId} marked deleted (MQTT publish confirmed).`);
       }
     } catch (err) {
-      console.error('[Status] performDelete top-level error', err);
-      alert(`Unexpected error: ${err && err.message ? err.message : String(err)}`);
+      console.error('[Status] performDelete failed', err);
+      alert(`Failed to delete device ${deviceId}: ${err && err.message ? err.message : String(err)}`);
+      // keep pendingDelete so user can retry
+      return;
     } finally {
       setDeleting(false);
+      // Clear pendingDelete so the inline confirm no longer shows after success/failure handling
+      setPendingDelete(null);
     }
   };
 
@@ -601,7 +588,6 @@ export default function Status() {
             ) : deviceLogs.length > 0 ? (
               deviceLogs.map((l, i) => renderLogItem(l, i, d))
             ) : (
-              // If MQTT connected we are likely waiting for retained/fresh detection
               <div className={css(styles.noLogs)}>{mqttConnected ? 'Waiting for detection topic…' : 'No logs available'}</div>
             )}
           </div>
@@ -730,7 +716,6 @@ export default function Status() {
                                   {deviceLogs.map((l, i) => renderLogItem(l, i, d))}
                                 </div>
                               ) : (
-                                // show waiting message when MQTT is connected and we received no logs in the small capture window
                                 <div className={css(styles.noLogs)}>{mqttConnected ? 'Waiting for detection topic…' : 'No logs available'}</div>
                               )}
                             </div>
