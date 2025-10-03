@@ -1,39 +1,62 @@
 // src/components/Dashboard.jsx
-
 import React, { useContext, useMemo } from 'react';
 import { FiTrash2, FiPlusCircle, FiWifi } from 'react-icons/fi';
 import { StyleSheet, css } from 'aphrodite';
-import { DeviceContext } from '../DeviceContext';
+// Use LocationContext (clean coords) instead of raw DeviceContext
+import { LocationContext } from '../LocationContext';
 import { MetricsContext } from '../MetricsContext';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 
+// --- Leaflet CSS + default icon fix (important for markers to display) ---
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+import markerIconUrl from 'leaflet/dist/images/marker-icon.png';
+import markerIcon2xUrl from 'leaflet/dist/images/marker-icon-2x.png';
+import markerShadowUrl from 'leaflet/dist/images/marker-shadow.png';
+
+// ensure default icon images are set for common bundlers
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2xUrl,
+  iconUrl: markerIconUrl,
+  shadowUrl: markerShadowUrl,
+});
+// --- end leaflet fixes ---
+
 const Dashboard = () => {
   const { fullBinAlerts, floodRisks, activeDevices } = useContext(MetricsContext);
-  const { devices } = useContext(DeviceContext);
+  // locations are guaranteed to have valid lat/lon by LocationContext
+  const { locations } = useContext(LocationContext) || { locations: [] };
 
-  // Helper to show "Loading…" when null
   const displayValue = (val) => (val === null ? 'Loading…' : val);
 
-  // 1) Compute initial center & zoom for the map
+  // Defensive: ensure we only use finite numeric coords and reject 0,0 placeholders
+  const devicesWithCoords = useMemo(() => {
+    return (locations || []).filter((d) => {
+      const lat = Number(d.lat);
+      const lon = Number(d.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+      if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return false;
+      // treat exact (0,0) as invalid placeholder
+      if (lat === 0 && lon === 0) return false;
+      return true;
+    }).map(d => ({ ...d, lat: Number(d.lat), lon: Number(d.lon) }));
+  }, [locations]);
+
+  // compute initial center; prefer most recently seen device with coords
   const { initialCenter, initialZoom } = useMemo(() => {
-    if (devices.length > 0) {
-      // Find first device that has valid lat/lon
-      const firstWithGPS = devices.find(
-        (d) => typeof d.lat === 'number' && typeof d.lon === 'number'
-      );
-      if (firstWithGPS) {
-        return {
-          initialCenter: [firstWithGPS.lat, firstWithGPS.lon],
-          initialZoom: 13,
-        };
-      }
+    if (devicesWithCoords.length > 0) {
+      // devices are already sorted by lastSeen in LocationContext.flushLocations,
+      // but just pick the first valid one here.
+      const first = devicesWithCoords[0];
+      return {
+        initialCenter: [first.lat, first.lon],
+        initialZoom: 13,
+      };
     }
-    // Fallback if no valid device coords
-    return {
-      initialCenter: [0, 0],
-      initialZoom: 2,
-    };
-  }, [devices]);
+    // global fallback
+    return { initialCenter: [0, 0], initialZoom: 2 };
+  }, [devicesWithCoords]);
 
   return (
     <div className={css(styles.dashboardContainer)}>
@@ -63,6 +86,8 @@ const Dashboard = () => {
           <h2 style={{ color: 'white', marginBottom: '16px' }}>Device Map</h2>
 
           <MapContainer
+            // key forces re-init when center changes (helps when locations arrive after mount)
+            key={initialCenter.join(',')}
             center={initialCenter}
             zoom={initialZoom}
             scrollWheelZoom={true}
@@ -70,24 +95,19 @@ const Dashboard = () => {
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
-            {devices.map((d) => {
-              if (typeof d.lat !== 'number' || typeof d.lon !== 'number') {
-                return null;
-              }
-              return (
-                <Marker key={d.id} position={[d.lat, d.lon]}>
-                  <Popup>
-                    <b>{d.id}</b>
-                    <br />
-                    Flooded: {d.flooded ? 'Yes' : 'No'}
-                    <br />
-                    Bin Full: {d.binFull ? 'Yes' : 'No'}
-                    <br />
-                    Active: {d.active ? 'Yes' : 'No'}
-                  </Popup>
-                </Marker>
-              );
-            })}
+            {devicesWithCoords.map((d) => (
+              <Marker key={d.id} position={[d.lat, d.lon]}>
+                <Popup>
+                  <b>{d.id}</b>
+                  <br />
+                  Last seen: {d.lastSeen ? new Date(d.lastSeen).toLocaleString() : '—'}
+                  <br />
+                  Address: {d.address ?? '—'}
+                  <br />
+                  Fill: {d.fillPct != null ? `${d.fillPct}%` : '—'}
+                </Popup>
+              </Marker>
+            ))}
           </MapContainer>
         </div>
 
@@ -97,7 +117,8 @@ const Dashboard = () => {
             <h2>Real‐Time Alerts</h2>
             {(() => {
               const realTimeAlerts = [];
-              devices.forEach((d) => {
+              // use the cleaned locations/metadata if available, otherwise show nothing
+              (locations || []).forEach((d) => {
                 if (d.binFull) {
                   realTimeAlerts.push(`⚠️ Bin Full at Device ${d.id}`);
                 }
