@@ -35,6 +35,10 @@ function isValidCoord(lat, lon) {
   // strict numeric check (finite numbers within world bounds)
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
   if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return false;
+
+  // treat exact (0,0) as invalid placeholder — prevents pins at null/default coords
+  if (lat === 0 && lon === 0) return false;
+
   return true;
 }
 
@@ -200,8 +204,9 @@ export const LocationProvider = ({ children }) => {
 
     // only accept valid numeric coords — otherwise leave the existing coords untouched
     const parsed = normalizeLatLon(lat, lon);
-    if (!parsed) {
-      if (DEBUG) console.debug('[Location] updateDeviceLocation — incoming coords invalid, ignoring', { id: sid, lat, lon });
+    // reject parsed coords if they're invalid (e.g. 0,0 or out-of-range)
+    if (!parsed || !isValidCoord(parsed.lat, parsed.lon)) {
+      if (DEBUG) console.debug('[Location] updateDeviceLocation — incoming coords invalid or placeholder, ignoring', { id: sid, lat, lon, parsed });
       // still update lastSeen/presence but do not set invalid coords
       prev.lastSeen = now;
       prev.online = true;
@@ -492,20 +497,22 @@ export const LocationProvider = ({ children }) => {
               const latN = Number(mLatRaw);
               const lonN = Number(mLonRaw);
 
-              // NEW: If DB meta has numeric coords, always assign them (more robust)
+              // NEW: If DB meta has numeric coords, assign them only if valid (reject 0,0)
               if (mLatRaw !== null && mLatRaw !== undefined && mLonRaw !== null && mLonRaw !== undefined) {
                 if (Number.isFinite(latN) && Number.isFinite(lonN)) {
-                  // assign regardless of previous d.lat/d.lon values so we don't leave nulls
-                  if (d.lat !== latN || d.lon !== lonN) {
-                    d.lat = latN;
-                    d.lon = lonN;
-                    changed = true;
+                  // only accept DB coords that are valid (reject 0,0 placeholders)
+                  if (isValidCoord(latN, lonN)) {
+                    if (d.lat !== latN || d.lon !== lonN) {
+                      d.lat = latN;
+                      d.lon = lonN;
+                      changed = true;
+                    } else {
+                      d.lat = latN;
+                      d.lon = lonN;
+                      changed = true;
+                    }
                   } else {
-                    // even if equal, ensure typed numeric values are stored (avoid nulls/strings)
-                    d.lat = latN;
-                    d.lon = lonN;
-                    // mark changed so flushLocations will include it
-                    changed = true;
+                    if (DEBUG) console.debug('[Location] DB fallback ignored invalid/placeholder coords for', id, { latN, lonN });
                   }
                 }
               }
