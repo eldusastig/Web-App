@@ -15,6 +15,7 @@ import Login     from './components/Login';
 import { DeviceProvider } from './DeviceContext';
 import { MetricsProvider } from './MetricsContext';
 import { LocationProvider } from './LocationContext'; // <-- ADDED
+import AlertProvider from './AlertProvider';    // <-- ALERTS (must exist)
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -23,30 +24,32 @@ export default function App() {
   const handleLogout = () => setIsLoggedIn(false);
 
   return (
-    <LocationProvider>         {/* <-- WRAP app with LocationProvider */}
+    <LocationProvider>         {/* top-level location provider */}
       <DeviceProvider>
         <MetricsProvider>
-          <div className={css(styles.appContainer)}>
-            <Router>
-              {!isLoggedIn ? (
-                <div className={css(styles.loginWrapper)}>
-                  <Login onLogin={handleLogin} />
-                </div>
-              ) : (
-                <>
-                  <Sidebar onLogout={handleLogout} />
-                  <div className={css(styles.contentContainer)}>
-                    <Routes>
-                      <Route path="/" element={<Dashboard />} />
-                      <Route path="/locations" element={<Locations />} />
-                      <Route path="/status" element={<Status />} />
-                      <Route path="/about" element={<About />} />
-                    </Routes>
+          <AlertProvider>     {/* KEEP mounted here so alerts work on every route */}
+            <div className={css(styles.appContainer)}>
+              <Router>
+                {!isLoggedIn ? (
+                  <div className={css(styles.loginWrapper)}>
+                    <Login onLogin={handleLogin} />
                   </div>
-                </>
-              )}
-            </Router>
-          </div>
+                ) : (
+                  <>
+                    <Sidebar onLogout={handleLogout} />
+                    <div className={css(styles.contentContainer)}>
+                      <Routes>
+                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/locations" element={<Locations />} />
+                        <Route path="/status" element={<Status />} />
+                        <Route path="/about" element={<About />} />
+                      </Routes>
+                    </div>
+                  </>
+                )}
+              </Router>
+            </div>
+          </AlertProvider>
         </MetricsProvider>
       </DeviceProvider>
     </LocationProvider>
