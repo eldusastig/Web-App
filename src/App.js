@@ -15,7 +15,7 @@ import Login     from './components/Login';
 import { DeviceProvider } from './DeviceContext';
 import { MetricsProvider } from './MetricsContext';
 import { LocationProvider } from './LocationContext'; // <-- ADDED
-import AlertProvider from './AlertProvider';    // <-- ALERTS (must exist)
+import AlertProvider from './components/AlertProvider';    // <-- ALERTS (must exist)
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
