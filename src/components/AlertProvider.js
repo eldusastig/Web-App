@@ -9,9 +9,10 @@ import { StyleSheet, css } from 'aphrodite';
  * - It watches `devices` from MetricsContext and fires:
  *    - in-app persistent popup (user must press Dismiss),
  *    - system notification (Notification API),
- *    - attention-grabbing repeating alarm (Web Audio API) while popups exist.
+ *    - attention-grabbing repeating siren (Web Audio API) while popups exist.
  *
- * The alarm sequence now repeats every 3000 ms while popups exist.
+ * The siren plays once per cycle; the cycle repeats every 3000 ms while popups exist.
+ * Note: browsers often require a user gesture before audio will play.
  */
 
 export const AlertContext = createContext({
@@ -28,13 +29,10 @@ export default function AlertProvider({ children }) {
   const addPopup = (message) => {
     const id = Math.random().toString(36).slice(2, 9);
     const ts = Date.now();
-    setPopups((p) => [{ id, message, ts }, ...p]); // no slice -> keep all until dismissed
+    setPopups((p) => [{ id, message, ts }, ...p]); // keep until dismissed
   };
   const dismissPopup = (id) => {
-    setPopups((p) => {
-      const next = p.filter((x) => x.id !== id);
-      return next;
-    });
+    setPopups((p) => p.filter((x) => x.id !== id));
   };
 
   // mute persistence
@@ -51,12 +49,10 @@ export default function AlertProvider({ children }) {
   const ALERT_DEBOUNCE_MS = 20_000;
 
   // -----------------------
-  // WebAudio: louder & repeating alarm while popups exist
+  // WebAudio: siren & repeating while popups exist
   // -----------------------
   const audioCtxRef = useRef(null);
-  const audioLoopRef = useRef(null);     // holds interval id for repeating sequence
-  const playingRef = useRef(false);      // whether sequence currently running
-
+  const audioLoopRef = useRef(null); // interval id
   const ensureAudioContext = () => {
     if (audioCtxRef.current) return audioCtxRef.current;
     try {
@@ -69,54 +65,107 @@ export default function AlertProvider({ children }) {
     }
   };
 
-  // play a single pulse at given freq & duration with a stronger gain
-  const playPulse = (freq = 880, dur = 250, peak = 0.35) => {
+  /**
+   * playSirenOnce:
+   * - creates an oscillator that sweeps frequency up then down over `durationMs`.
+   * - uses a small low-frequency oscillator (LFO) to modulate pitch slightly for realism.
+   * - strong amplitude envelope for attention grabbing.
+   *
+   * Parameters tuned for loud, urgent siren while avoiding extreme clipping.
+   */
+  const playSirenOnce = async (opts = {}) => {
+    if (muted) return;
+    const {
+      startFreq = 600,   // Hz
+      peakFreq = 1400,   // Hz
+      durationMs = 1200, // total ms for one up-and-down sweep
+      peakGain = 0.45,   // amplitude peak (0.0 - 1.0)
+      lfoFreq = 5.5,     // vibrato freq in Hz
+      lfoDepth = 10,     // vibrato depth in Hz
+    } = opts;
+
     const ctx = ensureAudioContext();
     if (!ctx) return;
+    if (ctx.state === 'suspended') {
+      try { await ctx.resume(); } catch (e) { /* ignore - may require user gesture */ }
+    }
+
     try {
+      const now = ctx.currentTime;
+      // main oscillator + gain
       const o = ctx.createOscillator();
       const g = ctx.createGain();
-      o.type = 'sine';
-      o.frequency.value = freq;
-      // start with very low gain to avoid clicks, ramp up quickly to peak
-      g.gain.setValueAtTime(0.0001, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(Math.max(peak, 0.02), ctx.currentTime + 0.005);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + (dur / 1000));
+      // set a waveform that sounds urgent but not piercing; triangle or sawtooth are options.
+      o.type = 'sine'; // smooth; change to 'triangle' or 'sawtooth' for different timbre
+
+      // LFO for vibrato
+      const lfo = ctx.createOscillator();
+      lfo.type = 'sine';
+      lfo.frequency.setValueAtTime(lfoFreq, now);
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.setValueAtTime(lfoDepth, now); // in Hz
+
+      // Connect LFO to main oscillator frequency param
+      lfo.connect(lfoGain);
+      lfoGain.connect(o.frequency);
+
+      // connect main oscillator -> gain -> destination
       o.connect(g);
       g.connect(ctx.destination);
-      o.start(ctx.currentTime);
-      o.stop(ctx.currentTime + (dur / 1000) + 0.02);
+
+      // amplitude envelope: ramp up quickly then ramp down at end
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.02, peakGain), now + 0.02);
+      // schedule ramp down at end
+      const stopTime = now + durationMs / 1000;
+      g.gain.exponentialRampToValueAtTime(0.0001, stopTime + 0.02);
+
+      // schedule frequency sweep: up then down
+      // ramp up to peak at halfway, then back to start
+      o.frequency.setValueAtTime(startFreq, now);
+      const half = now + (durationMs / 1000) / 2;
+      o.frequency.linearRampToValueAtTime(peakFreq, half);
+      o.frequency.linearRampToValueAtTime(startFreq, stopTime);
+
+      // start everything
+      o.start(now);
+      lfo.start(now);
+
+      // stop after completion + small buffer
+      const stopBuffer = 0.04;
+      o.stop(stopTime + stopBuffer);
+      lfo.stop(stopTime + stopBuffer);
+
+      // cleanup when ended
       o.onended = () => {
-        try { o.disconnect(); g.disconnect(); } catch (e) {}
+        try {
+          o.disconnect();
+        } catch (e) {}
+        try {
+          lfo.disconnect();
+        } catch (e) {}
+        try {
+          lfoGain.disconnect();
+        } catch (e) {}
+        try {
+          g.disconnect();
+        } catch (e) {}
       };
     } catch (e) {
-      // ignore
+      // ignore if audio scheduling fails
+      console.warn('siren play failed', e);
     }
   };
 
-  // attention-grabbing sequence: two pulses (high then lower) per cycle
-  const playSequenceOnce = async () => {
-    const ctx = ensureAudioContext();
-    if (!ctx) return;
-    // browsers often suspend audio until user interaction — attempt to resume
-    if (ctx.state === 'suspended') {
-      try { await ctx.resume(); } catch (e) { /* ignore */ }
-    }
-    // Two pulses: 880Hz (short), then 660Hz (short)
-    playPulse(880, 240, 0.45); // louder first pulse
-    setTimeout(() => playPulse(660, 240, 0.38), 260);
-  };
-
-  // start repeating alarm while there are popups (runs until all dismissed or muted)
+  // start repeating siren while there are popups (runs until all dismissed or muted)
   const startAlarmLoop = () => {
     if (audioLoopRef.current) return;
-    // If muted, do not start.
     if (muted) return;
-    // immediate initial burst
-    try { playSequenceOnce(); } catch (e) {}
-    // repeat every 3000ms (user requested interval)
+    // immediate initial siren
+    try { playSirenOnce(); } catch (e) {}
+    // repeat every 3000ms (user requested)
     audioLoopRef.current = window.setInterval(() => {
-      try { playSequenceOnce(); } catch (e) {}
+      try { playSirenOnce(); } catch (e) {}
     }, 3000);
   };
 
@@ -127,23 +176,18 @@ export default function AlertProvider({ children }) {
     }
   };
 
-  // watch popups and (re)start/stop alarm loop
   useEffect(() => {
     if (muted) {
       stopAlarmLoop();
       return;
     }
-    if (popups.length > 0) {
-      startAlarmLoop();
-    } else {
-      stopAlarmLoop();
-    }
-    // cleanup on unmount
+    if (popups.length > 0) startAlarmLoop();
+    else stopAlarmLoop();
+
     return () => stopAlarmLoop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [popups.length, muted]);
 
-  // Ensure alarm loop stops on unmount
   useEffect(() => {
     return () => {
       stopAlarmLoop();
@@ -221,10 +265,9 @@ export default function AlertProvider({ children }) {
       // show system notification
       safeShowNotification('Alert', m);
 
-      // ensure audio context exists/resumed if possible — but user gesture may be required.
+      // try to resume audio context (may still require user gesture)
       const ctx = ensureAudioContext();
       if (ctx && ctx.state === 'suspended') {
-        // try to resume on next tick — may still fail without user gesture
         ctx.resume().catch(() => {});
       }
     });
