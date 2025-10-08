@@ -303,12 +303,6 @@ export default function AlertProvider({ children }) {
           </div>
         ))}
       </div>
-
-      {/* floating controls */}
-      <div className={css(styles.controls)}>
-        <button onClick={() => { try { requestPermission(); } catch (e) {} }} className={css(styles.ctrlBtn)}>Enable Notifications</button>
-        <button onClick={() => setMuted((m) => !m)} className={css(styles.ctrlBtn)}>{muted ? 'Unmute' : 'Mute'}</button>
-      </div>
     </AlertContext.Provider>
   );
 }
@@ -350,21 +344,75 @@ const styles = StyleSheet.create({
     fontSize: '0.95rem',
   },
 
-  controls: {
-    position: 'fixed',
-    left: '18px',
-    bottom: '18px',
-    display: 'flex',
-    gap: '8px',
-    zIndex: 1200,
+  /* Settings tab styles (kept if you later add a settings UI) */
+  settingsCard: {
+    background: 'rgba(255,255,255,0.02)',
+    border: '1px solid rgba(255,255,255,0.04)',
+    padding: '12px',
+    borderRadius: '10px',
+    maxWidth: '640px',
+    color: '#E6EEF8',
+    margin: '6px 0',
   },
-  ctrlBtn: {
+  settingsTitle: {
+    margin: '0 0 8px 0',
+    fontSize: '1.05rem',
+  },
+  settingsRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '8px 0',
+    borderTop: '1px solid rgba(255,255,255,0.02)',
+    ':first-of-type': { borderTop: 'none' },
+  },
+  settingsLabel: { fontSize: '0.95rem', marginBottom: '4px' },
+  settingsHelp: { fontSize: '0.82rem', color: 'rgba(226,232,240,0.75)' },
+  settingsBtn: {
     background: 'rgba(255,255,255,0.04)',
     border: '1px solid rgba(255,255,255,0.06)',
     color: '#E2E8F0',
-    padding: '6px 8px',
+    padding: '6px 10px',
     borderRadius: '6px',
     cursor: 'pointer',
     fontSize: '0.85rem',
   },
+
+  /* simple toggle (styles useful if you implement a settings tab) */
+  toggle: {
+    display: 'inline-block',
+    width: '46px',
+    height: '26px',
+    position: 'relative',
+    input: {
+      display: 'none',
+    },
+  },
+  toggleSlider: {
+    position: 'absolute',
+    cursor: 'pointer',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(255,255,255,0.08)',
+    borderRadius: '999px',
+    transition: '0.2s',
+    // the knob
+    '::after': {
+      content: "''",
+      position: 'absolute',
+      height: '20px',
+      width: '20px',
+      left: '3px',
+      top: '3px',
+      background: '#fff',
+      borderRadius: '50%',
+      transition: '0.2s',
+    },
+  },
+
+  /* small utilities (if you want to reuse) */
+  settingsSmall: { fontSize: '0.85rem' },
 });
