@@ -232,9 +232,132 @@ export default function Status() {
     try { return String(cls).trim() !== ''; } catch (e) { return false; }
   };
 
+  // ---------------------------
+  // Animal detection helpers (NEW)
+  // ---------------------------
+  // conservative list of animal keywords (lowercase). Extend as needed.
+  const ANIMAL_KEYWORDS = new Set([
+    'dog','cat','bird','cow','goat','sheep','pig','horse','rat','mouse','squirrel','rabbit','deer','fox','bear','monkey',
+    'duck','chicken','hen','rooster','pigeon','owl','eagle','hawk','seagull','fish','shark','whale','dolphin','crab','lobster',
+    'turkey','geese','goose','frog','toad','lizard','snake','hamster','gerbil','ferret',
+    // explicit generic tokens so a class named "Animals" or "Animal" matches
+    'animal','animals'
+  ]);
+
+  const cleanToken = (s) => {
+    if (!s && s !== 0) return '';
+    try {
+      return String(s).toLowerCase().trim().replace(/[^a-z0-9\s]/g, '');
+    } catch (e) {
+      return '';
+    }
+  };
+
+  const isAnimalClass = (cls) => {
+    if (!cls) return false;
+    // string
+    if (typeof cls === 'string') {
+      const tok = cleanToken(cls);
+      if (!tok) return false;
+      if (ANIMAL_KEYWORDS.has(tok)) return true;
+      // check words inside string
+      for (const w of tok.split(/\s+/)) if (ANIMAL_KEYWORDS.has(w)) return true;
+      return false;
+    }
+    // array
+    if (Array.isArray(cls)) {
+      return cls.some((c) => isAnimalClass(c));
+    }
+    // object: check keys (class names) and string values
+    if (typeof cls === 'object') {
+      for (const [k, v] of Object.entries(cls)) {
+        if (isAnimalClass(k)) return true;
+        if (typeof v === 'string' && isAnimalClass(v)) return true;
+      }
+      return false;
+    }
+    // fallback
+    return false;
+  };
+
+  const getClassLabel = (log) => {
+    if (!log) return 'None';
+    const cls = log.classes;
+    if (!cls) return 'None';
+    if (isAnimalClass(cls)) return 'Animal Detected';
+    return hasDetections(log) ? 'Rubbish Detected' : 'None';
+  };
+
+  const getClassLabelShort = (log) => getClassLabel(log);
+
   const formatClasses = (log) => {
     if (!log) return null;
-    return hasDetections(log) ? 'Rubbish Detected' : 'None';
+    return getClassLabel(log);
+  };
+
+  const formatLogTimestamp = (log, device) => {
+    const info = parseTsInfo(log?.ts);
+    if (info.kind === 'epoch-ms' || info.kind === 'epoch-s' || info.kind === 'iso') {
+      try { return info.date.toLocaleString(); } catch (e) { return info.date.toString(); }
+    }
+    if (info.kind === 'uptime') {
+      const arrivalMs = (log && log.arrival) || (device && device.lastSeen) || Date.now();
+      const estDate = new Date(arrivalMs);
+      const uptimeStr = formatUptime(info.uptimeMs);
+      try { return `${estDate.toLocaleString()} (${uptimeStr})`; } catch (e) { return `${estDate.toString()} (${uptimeStr})`; }
+    }
+    return '—';
+  };
+
+  const parseTsInfo = (rawTs) => {
+    if (rawTs == null) return { kind: 'unknown' };
+    if (rawTs instanceof Date && !isNaN(rawTs)) return { kind: 'epoch-ms', date: rawTs };
+    if (typeof rawTs === 'number' || (typeof rawTs === 'string' && /^\d+$/.test(rawTs.trim()))) {
+      const n = Number(rawTs);
+      if (n >= 1e12) return { kind: 'epoch-ms', date: new Date(n) };
+      if (n >= 1e9 && n < 1e12) return { kind: 'epoch-s', date: new Date(n * 1000) };
+      if (n >= 0 && n < 1e9) return { kind: 'uptime', uptimeMs: n };
+      return { kind: 'unknown' };
+    }
+    if (typeof rawTs === 'string') {
+      const trimmed = rawTs.trim();
+      const parsed = Date.parse(trimmed);
+      if (!isNaN(parsed)) return { kind: 'iso', date: new Date(parsed) };
+    }
+    return { kind: 'unknown' };
+  };
+
+  const formatUptime = (ms) => {
+    if (!isFinite(ms) || ms < 0) return 'uptime: —';
+    const s = Math.floor(ms / 1000);
+    const hours = Math.floor(s / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const secs = s % 60;
+    if (hours > 0) return `uptime: ${hours}h ${mins}m ${secs}s`;
+    if (mins > 0) return `uptime: ${mins}m ${secs}s`;
+    return `uptime: ${secs}s`;
+  };
+
+  const onToggleDevice = (d) => {
+    if (expandedDevice === d.id) {
+      setExpandedDevice(null);
+      return;
+    }
+    setExpandedDevice(d.id);
+    loadLogsForDevice(d);
+  };
+
+  const renderLogItem = (log, idx, device) => {
+    if (!log) return null;
+    const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
+    // use the new classification-aware label (Animal Detected if any animal class is present)
+    const classesLabel = getClassLabel(log);
+    return (
+      <div key={idx} className={css(styles.logItem)}>
+        <div className={css(styles.logTimestamp)}>{tsStr || '—'}</div>
+        <div className={css(styles.logClasses)}>{classesLabel}</div>
+      </div>
+    );
   };
 
   // ---------------------------
@@ -344,70 +467,6 @@ export default function Status() {
       setLoadingLogs((m) => ({ ...m, [id]: false }));
       subListenersRef.current.delete(id);
     }, 1500);
-  };
-
-  const parseTsInfo = (rawTs) => {
-    if (rawTs == null) return { kind: 'unknown' };
-    if (rawTs instanceof Date && !isNaN(rawTs)) return { kind: 'epoch-ms', date: rawTs };
-    if (typeof rawTs === 'number' || (typeof rawTs === 'string' && /^\d+$/.test(rawTs.trim()))) {
-      const n = Number(rawTs);
-      if (n >= 1e12) return { kind: 'epoch-ms', date: new Date(n) };
-      if (n >= 1e9 && n < 1e12) return { kind: 'epoch-s', date: new Date(n * 1000) };
-      if (n >= 0 && n < 1e9) return { kind: 'uptime', uptimeMs: n };
-      return { kind: 'unknown' };
-    }
-    if (typeof rawTs === 'string') {
-      const trimmed = rawTs.trim();
-      const parsed = Date.parse(trimmed);
-      if (!isNaN(parsed)) return { kind: 'iso', date: new Date(parsed) };
-    }
-    return { kind: 'unknown' };
-  };
-
-  const formatUptime = (ms) => {
-    if (!isFinite(ms) || ms < 0) return 'uptime: —';
-    const s = Math.floor(ms / 1000);
-    const hours = Math.floor(s / 3600);
-    const mins = Math.floor((s % 3600) / 60);
-    const secs = s % 60;
-    if (hours > 0) return `uptime: ${hours}h ${mins}m ${secs}s`;
-    if (mins > 0) return `uptime: ${mins}m ${secs}s`;
-    return `uptime: ${secs}s`;
-  };
-
-  const formatLogTimestamp = (log, device) => {
-    const info = parseTsInfo(log?.ts);
-    if (info.kind === 'epoch-ms' || info.kind === 'epoch-s' || info.kind === 'iso') {
-      try { return info.date.toLocaleString(); } catch (e) { return info.date.toString(); }
-    }
-    if (info.kind === 'uptime') {
-      const arrivalMs = (log && log.arrival) || (device && device.lastSeen) || Date.now();
-      const estDate = new Date(arrivalMs);
-      const uptimeStr = formatUptime(info.uptimeMs);
-      try { return `${estDate.toLocaleString()} (${uptimeStr})`; } catch (e) { return `${estDate.toString()} (${uptimeStr})`; }
-    }
-    return '—';
-  };
-
-  const onToggleDevice = (d) => {
-    if (expandedDevice === d.id) {
-      setExpandedDevice(null);
-      return;
-    }
-    setExpandedDevice(d.id);
-    loadLogsForDevice(d);
-  };
-
-  const renderLogItem = (log, idx, device) => {
-    if (!log) return null;
-    const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
-    const classesLabel = hasDetections(log) ? 'Rubbish Detected' : 'None';
-    return (
-      <div key={idx} className={css(styles.logItem)}>
-        <div className={css(styles.logTimestamp)}>{tsStr || '—'}</div>
-        <div className={css(styles.logClasses)}>{classesLabel}</div>
-      </div>
-    );
   };
 
   // Helper: wrap client.publish in a Promise (resolves on callback)
