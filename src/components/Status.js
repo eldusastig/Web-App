@@ -280,12 +280,42 @@ export default function Status() {
     return false;
   };
 
+  // New helper: detect if this log is a retained/placeholder message where the model hasn't produced real detections yet
+  const isPendingModel = (log) => {
+    if (!log || !log.raw) return false;
+
+    // retained MQTT payloads are explicitly marked when collected
+    if (log.raw._retained === true) return true;
+
+    // empty/placeholder payloads represented as empty string, "[]", "null", "none"
+    if (typeof log.raw === 'string') {
+      const s = log.raw.trim().toLowerCase();
+      if (s === '' || s === '[]' || s === 'null' || s === 'none') return true;
+    }
+
+    // classes explicitly empty (empty array or empty object) — treat as pending rather than final 'None'
+    if (Array.isArray(log.classes) && log.classes.length === 0) return true;
+    if (typeof log.classes === 'object' && log.classes !== null && Object.keys(log.classes).length === 0) return true;
+
+    return false;
+  };
+
   const getClassLabel = (log) => {
     if (!log) return 'None';
     const cls = log.classes;
-    if (!cls) return 'None';
+
+    // PRIORITY: animals always win even if other waste classes are present
     if (isAnimalClass(cls)) return 'Animal Detected';
-    return hasDetections(log) ? 'Rubbish Detected' : 'None';
+
+    // If there are non-animal detections, show 'Rubbish Detected'
+    if (hasDetections(log)) return 'Rubbish Detected';
+
+    // If this looks like a retained/placeholder message (model hasn't produced real labels yet)
+    // show an explicit 'Awaiting detections' label instead of defaulting to 'None'.
+    if (isPendingModel(log)) return 'Awaiting detections';
+
+    // otherwise fallback to 'None'
+    return 'None';
   };
 
   const getClassLabelShort = (log) => getClassLabel(log);
