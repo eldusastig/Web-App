@@ -237,9 +237,6 @@ export default function Status() {
   // ---------------------------
   // conservative list of animal keywords (lowercase). Extend as needed.
   const ANIMAL_KEYWORDS = new Set([
-    'dog','cat','bird','cow','goat','sheep','pig','horse','rat','mouse','squirrel','rabbit','deer','fox','bear','monkey',
-    'duck','chicken','hen','rooster','pigeon','owl','eagle','hawk','seagull','fish','shark','whale','dolphin','crab','lobster',
-    'turkey','geese','goose','frog','toad','lizard','snake','hamster','gerbil','ferret',
     // explicit generic tokens so a class named "Animals" or "Animal" matches
     'animal','animals'
   ]);
