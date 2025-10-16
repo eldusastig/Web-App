@@ -68,6 +68,7 @@ export const MetricsProvider = ({ children }) => {
   }
 
   function parseFillPct(payload) {
+    // kept for compatibility but we do NOT use fillPct as the canonical measure anymore.
     if (!payload || typeof payload !== 'object') return null;
     const candidates = ['fillPct', 'fill_pct', 'binFillPct', 'bin_fill_pct', 'fill'];
     for (const k of candidates) {
@@ -105,16 +106,15 @@ export const MetricsProvider = ({ children }) => {
         lastSeen: now,
         online: true,
         logs: [],
-        binFillPct: null,
+        // binFull remains as boolean flag either from payload or derived from weight
         binFull: false,
         flooded: false,
         // placeholders used by UI
         lat: null,
         lon: null,
-        fillPct: null,
         address: null,
-        // new: weight
-        weightkg: null,
+        // canonical weight field (kg)
+        weightKg: null,
       };
     }
 
@@ -131,7 +131,7 @@ export const MetricsProvider = ({ children }) => {
       return n;
     };
 
-    const weightCandidates = ['weight_kg', 'weightKg', 'weight', 'wt_kg', 'weight_g', 'mass_g', 'wtg', 'weight'];
+    const weightCandidates = ['weight_kg', 'weightKg', 'weight', 'wt_kg', 'weight_g', 'mass_g', 'wtg'];
     for (const k of weightCandidates) {
       if (payload && payload[k] !== undefined && payload[k] !== null) {
         const found = tryNum(payload[k]);
@@ -170,34 +170,19 @@ export const MetricsProvider = ({ children }) => {
     dev.online = true;
 
     // ----- BIN DETERMINATION PRIORITY -----
-    // Priority order (configurable behavior):
+    // Priority:
     // 1. If payload explicitly includes binFull (boolean) -> respect it.
     // 2. Else if weight available -> derive binFull from weight >= BIN_FULL_WEIGHT_KG.
-    // 3. Else if fillPct available -> derive from fillPct >= BIN_FULL_ALERT_PCT.
-
+    // 3. Else if fillPct present in payload -> derive binFull from fillPct >= BIN_FULL_ALERT_PCT (kept for backward compatibility).
     if (payload && typeof payload.binFull === 'boolean') {
       dev.binFull = payload.binFull;
-      dev.binFillPct = payload.binFull ? 100 : dev.binFillPct;
-      if (dev.binFillPct !== null) dev.fillPct = dev.binFillPct;
+      // If payload also contains a weight, we still store it below
     } else if (weightKg !== null) {
       dev.weightKg = Number(weightKg.toFixed(3));
-      // Derive binFull from weight threshold
       dev.binFull = (dev.weightKg >= BIN_FULL_WEIGHT_KG);
-
-      // Optionally set/estimate fillPct based on weight
-      if (dev.binFull) {
-        dev.binFillPct = 100;
-        dev.fillPct = 100;
-      } else {
-        // Map 0..BIN_FULL_WEIGHT_KG -> 0..90% so threshold remains meaningful
-        const estPct = Math.round(Math.max(0, Math.min(100, (dev.weightKg / BIN_FULL_WEIGHT_KG) * 90)));
-        dev.binFillPct = dev.binFillPct ?? estPct;
-        dev.fillPct = dev.fillPct ?? estPct;
-      }
     } else if (pct != null) {
-      dev.binFillPct = pct;
+      // maintain backward compatibility: payload that only provides fill% still sets binFull if >= threshold
       dev.binFull = pct >= BIN_FULL_ALERT_PCT;
-      dev.fillPct = pct;
     }
 
     // Flooded
@@ -275,7 +260,7 @@ export const MetricsProvider = ({ children }) => {
     const arr = Array.from(map.values()).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
     setDevices(arr);
 
-    if (DEBUG) console.debug('[MetricsContext] updateDeviceFromLog', sid, { lat: dev.lat, lon: dev.lon, fillPct: dev.fillPct, binFull: dev.binFull, weightKg: dev.weightKg });
+    if (DEBUG) console.debug('[MetricsContext] updateDeviceFromLog', sid, { lat: dev.lat, lon: dev.lon, binFull: dev.binFull, weightKg: dev.weightKg });
 
     return isNew;
   }
@@ -413,8 +398,10 @@ export const MetricsProvider = ({ children }) => {
 
   useEffect(() => {
     setFullBinAlerts(devices.filter((d) => {
-      if (typeof d.binFillPct === 'number') return d.binFillPct >= BIN_FULL_ALERT_PCT;
-      return Boolean(d.binFull);
+      // count explicit binFull OR weight-based binFull
+      if (d && d.binFull === true) return true;
+      if (d && typeof d.weightKg === 'number' && d.weightKg >= BIN_FULL_WEIGHT_KG) return true;
+      return false;
     }).length);
 
     setFloodRisks(devices.filter((d) => d.flooded).length);
@@ -507,17 +494,30 @@ export const MetricsProvider = ({ children }) => {
             changed = true;
           }
 
-          // Prefer fillPct or similar keys
-          const metaFill = meta.fillPct ?? meta.fill_pct ?? meta.binFillPct ?? meta.bin_fill_pct ?? meta.fill ?? meta.fillPercent ?? meta.fill_percent;
-          if (metaFill !== undefined && metaFill !== null && Number.isFinite(Number(metaFill)) && (dev.fillPct === null || dev.fillPct === undefined)) {
-            const pct = Math.max(0, Math.min(100, Math.round(Number(metaFill))));
-            dev.fillPct = pct;
-            dev.binFillPct = pct;
-            dev.binFull = pct >= BIN_FULL_ALERT_PCT;
-            changed = true;
-          } else if ((meta.binFull === true || meta.bin_full === true) && (dev.binFull !== true)) {
+          // Prefer meta weight if present
+          const metaWeightCandidates = ['weight_kg', 'weightKg', 'weight', 'wt_kg', 'weight_g', 'mass_g', 'wtg'];
+          for (const k of metaWeightCandidates) {
+            if (meta[k] !== undefined && meta[k] !== null) {
+              const n = Number(meta[k]);
+              if (Number.isFinite(n)) {
+                let wkg = n;
+                if (/g$/.test(String(k)) || /_g$/.test(String(k)) || n > 1000) {
+                  wkg = n / 1000.0;
+                } else if (n > 100 && !/kg/i.test(String(k))) {
+                  wkg = n / 1000.0;
+                }
+                dev.weightKg = Number(wkg.toFixed(3));
+                // update binFull from weight if not already true
+                if (!dev.binFull) dev.binFull = dev.weightKg >= BIN_FULL_WEIGHT_KG;
+                changed = true;
+                break;
+              }
+            }
+          }
+
+          // Prefer binFull flag in meta
+          if ((meta.binFull === true || meta.bin_full === true) && (dev.binFull !== true)) {
             dev.binFull = true;
-            dev.binFillPct = dev.binFillPct ?? 100;
             changed = true;
           }
 
@@ -538,7 +538,7 @@ export const MetricsProvider = ({ children }) => {
             map.set(String(id), dev);
             const arr = Array.from(map.values()).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
             setDevices(arr);
-            if (DEBUG) console.debug('[MetricsContext] merged DB metadata for offline device', id, { address: dev.address, fillPct: dev.fillPct, lat: dev.lat, lon: dev.lon });
+            if (DEBUG) console.debug('[MetricsContext] merged DB metadata for offline device', id, { address: dev.address, weightKg: dev.weightKg, lat: dev.lat, lon: dev.lon });
           }
         }).catch((e) => {
           console.debug('[MetricsContext] fetchDeviceMetaFromFirebase failed for', id, e);
@@ -553,5 +553,3 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
-
-
