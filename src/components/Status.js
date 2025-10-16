@@ -491,34 +491,70 @@ export default function Status() {
 
     // HTTP first, then MQTT fallback (unchanged)
     const tryHttpFetch = async () => {
-      try {
-        setLoadingLogs((m) => ({ ...m, [id]: true }));
-        setErrorLogs((m) => ({ ...m, [id]: null }));
+  try {
+    setLoadingLogs((m) => ({ ...m, [id]: true }));
+    setErrorLogs((m) => ({ ...m, [id]: null }));
 
-        const url = `/api/devices/${encodeURIComponent(id)}/logs`;
-        const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-        if (res.status === 404) {
-          setLogsMap((m) => ({ ...m, [id]: [] }));
-          return true;
-        }
-        if (!res.ok) {
-          let body = '';
-          try { body = await res.text(); } catch (e) { body = '<unreadable>'; }
-          setErrorLogs((m) => ({ ...m, [id]: `Failed to load logs: ${res.status} ${res.statusText}` }));
-          console.error('[Status] HTTP logs fetch failed', res.status, body);
-          return false;
-        }
-        const json = await res.json();
-        const normalized = Array.isArray(json) ? json.map(normalizeLog).filter(Boolean) : [normalizeLog(json)].filter(Boolean);
-        setLogsMap((m) => ({ ...m, [id]: normalized }));
-        return true;
-      } catch (err) {
-        console.debug('[Status] HTTP logs fetch error, falling back to MQTT', err);
-        return false;
-      } finally {
-        setLoadingLogs((m) => ({ ...m, [id]: false }));
+    const url = `/api/devices/${encodeURIComponent(id)}/logs`;
+    const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+    if (res.status === 404) {
+      setLogsMap((m) => ({ ...m, [id]: [] }));
+      return true;
+    }
+    if (!res.ok) {
+      let body = '';
+      try { body = await res.text(); } catch (e) { body = '<unreadable>'; }
+      setErrorLogs((m) => ({ ...m, [id]: `Failed to load logs: ${res.status} ${res.statusText}` }));
+      console.error('[Status] HTTP logs fetch failed', res.status, body);
+      return false;
+    }
+
+    const json = await res.json();
+    // Normalize into an array of raw entries
+    const rawEntries = Array.isArray(json) ? json : [json];
+
+    // Filter to only detection-shaped entries:
+    const detectionCandidates = rawEntries.filter((entry) => {
+      if (!entry) return false;
+      // If server already included a marker that this was from detection topic, keep it
+      if (entry._detectionTopic === true) return true;
+
+      // Keep if explicit detection fields exist (even if empty array)
+      const hasDetKeys = ['classes','detected','items','labels'].some(k => Object.prototype.hasOwnProperty.call(entry, k));
+      if (hasDetKeys) return true;
+
+      // If entry is textual JSON that looks like an object/array, keep (some collectors store raw payload string)
+      if (typeof entry === 'string') {
+        const s = entry.trim();
+        if (s.startsWith('{') || s.startsWith('[')) return true;
       }
-    };
+
+      // otherwise drop non-detection telemetry/rows (weight, flood, etc.)
+      return false;
+    });
+
+    // Normalize and ensure each detection entry gets an arrival timestamp
+    let normalized = detectionCandidates.map(normalizeLog).filter(Boolean).map(n => ({ ...n, arrival: n.arrival ?? Date.now() }));
+
+    // (optional) dedupe exact payload duplicates, keep most recent first
+    const seen = new Set();
+    normalized = normalized.filter(n => {
+      const key = JSON.stringify(n.raw ?? n.classes ?? n);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    setLogsMap((m) => ({ ...m, [id]: normalized }));
+    return true;
+  } catch (err) {
+    console.debug('[Status] HTTP logs fetch error, falling back to MQTT', err);
+    return false;
+  } finally {
+    setLoadingLogs((m) => ({ ...m, [id]: false }));
+  }
+};
+
 
     const httpSucceeded = await tryHttpFetch();
     if (httpSucceeded) return;
