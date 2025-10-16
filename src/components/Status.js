@@ -982,8 +982,9 @@ const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0
                 {filteredDevices.map((d) => {
                   const isDisabled = boolish(d.disabled) || boolish(d.meta?.deleted) || boolish(d.deleted);
                   const isExpanded = expandedDevice === d.id;
-                  const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0 ? d.logs.map(normalizeLog).filter(Boolean) : (logsMap[d.id] || []);
-
+const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0
+  ? filterAndNormalizeDeviceLogs(d.logs)
+  : (logsMap[d.id] || []);
                   return (
                     <React.Fragment key={d.id}>
                       <tr
