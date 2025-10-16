@@ -508,57 +508,17 @@ const filterAndNormalizeDeviceLogs = (logs) => {
   };
 
  const renderLogItem = (log, idx, device) => {
-  if (!log) return null;
-
-  // timestamp as before
-  const tsStr = log.ts ? formatLogTimestamp(log, device) : (formatLogTimestamp(log, device) || '—');
-
-  // classify as before
-  const classesLabel = getClassLabel(log);
-
-  // debug flags
-  const explicitEmpty = !!(log.raw && log.raw._explicitEmptyClasses);
-  const detectionTopic = !!(log.raw && log.raw._detectionTopic);
-  const retained = !!(log.raw && log.raw._retained);
-
-  // show normalized classes for clarity
-  let normalizedClasses = '';
-  try {
-    normalizedClasses = JSON.stringify(log.classes);
-  } catch (e) {
-    normalizedClasses = String(log.classes);
-  }
-
-  // raw payload snippet
-  let rawSnippet = '';
-  try {
-    const nested = (typeof log.raw === 'object' && log.raw.raw !== undefined) ? log.raw.raw : log.raw;
-    if (typeof nested === 'string') rawSnippet = nested.slice(0, 200);
-    else rawSnippet = JSON.stringify(nested).slice(0, 200);
-  } catch (e) {
-    rawSnippet = String(log.raw).slice(0, 200);
-  }
-
-  return (
-    <div key={idx} className={css(styles.logItem)}>
-      <div className={css(styles.logTimestamp)}>{tsStr || '—'}</div>
-      <div>
+    if (!log) return null;
+    const tsStr = log.ts ? formatLogTimestamp(log, device) : (formatLogTimestamp(log, device) || '—');
+    // use the new classification-aware label (Animal Detected if any animal class is present)
+    const classesLabel = getClassLabel(log);
+    return (
+      <div key={idx} className={css(styles.logItem)}>
+        <div className={css(styles.logTimestamp)}>{tsStr || '—'}</div>
         <div className={css(styles.logClasses)}>{classesLabel}</div>
-
-        <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 6 }}>
-          <span style={{ marginRight: 12 }}>explicitEmpty: {explicitEmpty ? '✓' : '—'}</span>
-          <span style={{ marginRight: 12 }}>detectionTopic: {detectionTopic ? '✓' : '—'}</span>
-          <span style={{ marginRight: 12 }}>retained: {retained ? '✓' : '—'}</span>
-          <span>classes(normalized): {normalizedClasses}</span>
-        </div>
-
-        <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 6 }}>
-          <strong>raw:</strong> <code>{rawSnippet}</code>
-        </div>
       </div>
-    </div>
-  );
-};
+    );
+  };
 
   // ---------------------------
   // Logs loading (MQTT-backed)
