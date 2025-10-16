@@ -278,6 +278,47 @@ export default function Status() {
   return { ts: null, classes: normalizeClasses(String(entry)), arrival: Date.now(), raw: entry };
 };
 
+// Keep only detection-shaped entries from device.logs (or HTTP raw rows),
+// normalize them and ensure each has an arrival timestamp.
+const filterAndNormalizeDeviceLogs = (logs) => {
+  if (!Array.isArray(logs) || logs.length === 0) return [];
+
+  const detectionCandidates = logs.filter((entry) => {
+    if (!entry) return false;
+
+    // If the server already annotated it as detection topic, keep.
+    if (entry._detectionTopic === true) return true;
+
+    // Keep if explicit detection keys exist (even if empty array)
+    const hasDetKeys = ['classes', 'detected', 'items', 'labels'].some((k) =>
+      Object.prototype.hasOwnProperty.call(entry, k)
+    );
+    if (hasDetKeys) return true;
+
+    // If entry is textual JSON that looks like an object/array, keep it (some collectors store raw payload strings)
+    if (typeof entry === 'string') {
+      const s = entry.trim();
+      if (s.startsWith('{') || s.startsWith('[')) return true;
+    }
+
+    // otherwise drop non-detection telemetry/rows
+    return false;
+  });
+
+  // normalize each candidate and ensure arrival exists
+  let normalized = detectionCandidates.map(normalizeLog).filter(Boolean).map(n => ({ ...n, arrival: n.arrival ?? Date.now() }));
+
+  // optional: dedupe identical payloads keeping the most recent first
+  const seen = new Set();
+  normalized = normalized.filter((n) => {
+    const key = JSON.stringify(n.raw ?? n.classes ?? n);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return normalized;
+};
 
   const hasDetections = (log) => {
     if (!log) return false;
@@ -819,8 +860,9 @@ export default function Status() {
   const DeviceCard = ({ d }) => {
     const isDisabled = boolish(d.disabled) || boolish(d.meta?.deleted) || boolish(d.deleted);
     const addr = d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—';
-    const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0 ? d.logs.map(normalizeLog).filter(Boolean) : (logsMap[d.id] || []);
-
+const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0
+  ? filterAndNormalizeDeviceLogs(d.logs)
+  : (logsMap[d.id] || []);
     return (
       <div className={css(styles.deviceCard)}>
         <div className={css(styles.cardHeader)}>
