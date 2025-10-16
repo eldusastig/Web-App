@@ -322,7 +322,12 @@ export default function Status() {
   const isPendingModel = (log) => {
     if (!log || !log.raw) return false;
 
+    // preserved retained marker from broker
     if (log.raw._retained === true) return true;
+
+    // If this message came from the detection topic and there are no classes,
+    // it's likely the model hasn't produced labels yet -> pending.
+    if (log.raw._detectionTopic && (log.classes === null || log.classes === undefined)) return true;
 
     // handle wrapped { raw: ... } collector style
     const nested = (typeof log.raw === 'object' && log.raw.raw !== undefined) ? log.raw.raw : log.raw;
@@ -524,6 +529,11 @@ export default function Status() {
         payload = { raw: parsed, arrival: now };
         if (packet && packet.retain) payload._retained = true;
       }
+
+      // IMPORTANT: mark messages collected here as coming from the detection topic.
+      // This allows isPendingModel() to treat empty/placeholder detection-topic messages
+      // as "Awaiting detections" rather than "None".
+      payload._detectionTopic = true;
 
       collected.unshift(payload);
       if (collected.length >= 50) {
