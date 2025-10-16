@@ -114,7 +114,7 @@ export const MetricsProvider = ({ children }) => {
         fillPct: null,
         address: null,
         // new: weight
-        weightKg: null,
+        weight: null,
       };
     }
 
@@ -553,3 +553,4 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
+
