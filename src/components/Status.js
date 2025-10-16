@@ -217,7 +217,7 @@ export default function Status() {
       if (Object.prototype.hasOwnProperty.call(payload, 'confidence') || Object.prototype.hasOwnProperty.call(payload, 'label')) return true;
 
       // Telemetry sensor keys commonly present in your logs — treat these as telemetry (not detection)
-      const telemetryKeys = new Set(['weight_g', 'd1', 'd2', 'flooded', 'binFull', 'adc', 'avg', 'id']);
+      const telemetryKeys = new Set(['weight_kg', 'd1', 'd2', 'flooded', 'binFull', 'adc', 'avg', 'id']);
       // if object has at least one telemetry-only key and no detection keys -> telemetry
       let hasTelemetry = false;
       for (const k of Object.keys(payload)) {
@@ -713,7 +713,7 @@ export default function Status() {
         <div className={css(styles.cardBody)}>
           <div><strong>Address:</strong> {addr}</div>
           <div><strong>Flooded:</strong> <span className={css(boolish(d.flooded) ? styles.alert : styles.ok)}>{boolish(d.flooded) ? 'Yes' : 'No'}</span></div>
-          <div><strong>Bin Fill:</strong> {d.fillPct != null ? `${d.fillPct}%` : '-'}</div>
+          <div><strong>Weight (kg):</strong> {typeof d.weightKg === 'number' ? d.weightKg.toFixed(3) : '-'}</div>
           <div><strong>Active:</strong> <span className={css(boolish(d.active) || boolish(d.online) ? styles.ok : styles.alert)}>{boolish(d.active) || boolish(d.online) ? 'Yes' : 'No'}</span></div>
         </div>
 
@@ -798,7 +798,7 @@ export default function Status() {
                   <th>Device ID</th>
                   <th>Street Address</th>
                   <th>Flooded</th>
-                  <th>Bin Full</th>
+                  <th>Bin</th>
                   <th>Active</th>
                   <th>Actions</th>
                 </tr>
