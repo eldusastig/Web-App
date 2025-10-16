@@ -114,7 +114,7 @@ export const MetricsProvider = ({ children }) => {
         fillPct: null,
         address: null,
         // new: weight
-        weight: null,
+        weightkg: null,
       };
     }
 
@@ -131,7 +131,7 @@ export const MetricsProvider = ({ children }) => {
       return n;
     };
 
-    const weightCandidates = ['weight_kg', 'weightKg', 'weight', 'wt_kg', 'weight_g', 'mass_g', 'wtg'];
+    const weightCandidates = ['weight_kg', 'weightKg', 'weight', 'wt_kg', 'weight_g', 'mass_g', 'wtg', 'weight'];
     for (const k of weightCandidates) {
       if (payload && payload[k] !== undefined && payload[k] !== null) {
         const found = tryNum(payload[k]);
@@ -553,4 +553,5 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
+
 
