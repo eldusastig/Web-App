@@ -32,7 +32,7 @@ export default function Status() {
   const [mqttConnected, setMqttConnected] = useState(false);
 
   // local UI threshold - keep in sync with MetricsContext.BIN_FULL_WEIGHT_KG
-  const BIN_FULL_WEIGHT_KG = 5.0;
+  const BIN_FULL_WEIGHT_KG = 8.0;
 
   // topics to clear after deleting a device — templates with `{id}` placeholder
   const CLEAR_TOPIC_TEMPLATES = [
