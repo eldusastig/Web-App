@@ -249,12 +249,26 @@ export default function Status() {
       }
     }
     if (typeof entry === 'object') {
-      const ts = entry.ts ?? entry.time ?? entry.timestamp ?? null;
-      const rawClasses = entry.classes ?? entry.detected ?? entry.items ?? entry.labels ?? null;
-      const classes = normalizeClasses(rawClasses);
+      // clone so we can add diagnostic markers without mutating upstream data
+      const raw = { ...entry };
+
+      const ts = raw.ts ?? raw.time ?? raw.timestamp ?? null;
+
+      // preserve the original detection-shaped fields for heuristics
+      const rawClassesOriginal = raw.classes ?? raw.detected ?? raw.items ?? raw.labels ?? null;
+
+      // Heuristic: if this object *looks* like a detection payload (or explicitly contains detection keys),
+      // mark it so downstream logic (isPendingModel) can distinguish "no detections yet" from "none".
+      if (isDetectionPayload(raw) || rawClassesOriginal !== null) {
+        raw._detectionTopic = raw._detectionTopic ?? true;
+      }
+
       // arrival may be set by MQTT collector or server; preserve if present
-      const arrival = entry.arrival ?? null;
-      return { ts, classes, arrival, raw: entry };
+      const arrival = raw.arrival ?? null;
+
+      const classes = normalizeClasses(rawClassesOriginal);
+
+      return { ts, classes, arrival, raw };
     }
     return { ts: null, classes: normalizeClasses(String(entry)), arrival: null, raw: entry };
   };
@@ -337,7 +351,22 @@ export default function Status() {
       if (s === '' || s === '[]' || s === 'null' || s === 'none') return true;
     }
 
-    // If classes exist but are explicitly empty => pending
+    // If the original payload contained explicit detection keys but those were empty arrays
+    // we should consider this "awaiting detections" rather than "none".
+    if (typeof nested === 'object' && nested !== null) {
+      const detectionKeys = ['classes', 'detected', 'items', 'labels'];
+      for (const k of detectionKeys) {
+        if (Object.prototype.hasOwnProperty.call(nested, k)) {
+          const val = nested[k];
+          if (Array.isArray(val) && val.length === 0) return true;
+          if (val === null) return true;
+          // sometimes server may send an empty object to indicate no labels yet
+          if (typeof val === 'object' && val !== null && Object.keys(val).length === 0) return true;
+        }
+      }
+    }
+
+    // If classes exist but are explicitly empty => pending (fallback check on normalized classes)
     if (Array.isArray(log.classes) && log.classes.length === 0) return true;
     if (typeof log.classes === 'object' && log.classes !== null && Object.keys(log.classes).length === 0) return true;
 
