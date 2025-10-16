@@ -199,40 +199,40 @@ export default function Status() {
     return coerced.length === 0 || /^none$/i.test(coerced) || /^null$/i.test(coerced) ? null : coerced;
   }
   const isDetectionPayload = (payload) => {
-  if (!payload) return false;
+    if (!payload) return false;
 
-  // If payload is a primitive (string/number) — treat as detection if it's "[]", "none", etc.
-  if (typeof payload === 'string') {
-    const s = payload.trim().toLowerCase();
-    return s === '[]' || s === 'null' || s === 'none' || s.startsWith('{') || s.startsWith('[');
-  }
-
-  if (typeof payload === 'object') {
-    // Detection outputs normally include one of these keys
-    const detectionKeys = ['classes', 'detected', 'items', 'labels'];
-    for (const k of detectionKeys) if (Object.prototype.hasOwnProperty.call(payload, k)) return true;
-
-    // Some detection formats embed labels as top-level array or object with counts / names
-    // Treat as detection if it has 'confidence' or 'label' keys
-    if (Object.prototype.hasOwnProperty.call(payload, 'confidence') || Object.prototype.hasOwnProperty.call(payload, 'label')) return true;
-
-    // Telemetry sensor keys commonly present in your logs — treat these as telemetry (not detection)
-    const telemetryKeys = new Set(['weight_g', 'd1', 'd2', 'flooded', 'binFull', 'adc', 'avg', 'id']);
-    // if object has at least one telemetry-only key and no detection keys -> telemetry
-    let hasTelemetry = false;
-    for (const k of Object.keys(payload)) {
-      if (telemetryKeys.has(k)) { hasTelemetry = true; break; }
+    // If payload is a primitive (string/number) — treat as detection if it's "[]", "none", etc.
+    if (typeof payload === 'string') {
+      const s = payload.trim().toLowerCase();
+      return s === '[]' || s === 'null' || s === 'none' || s.startsWith('{') || s.startsWith('[');
     }
-    if (hasTelemetry) return false;
 
-    // otherwise be permissive: if it has any string/array structure but not telemetry, assume detection
-    return true;
-  }
+    if (typeof payload === 'object') {
+      // Detection outputs normally include one of these keys
+      const detectionKeys = ['classes', 'detected', 'items', 'labels'];
+      for (const k of detectionKeys) if (Object.prototype.hasOwnProperty.call(payload, k)) return true;
 
-  // fall back to false
-  return false;
-};.
-  
+      // Some detection formats embed labels as top-level array or object with counts / names
+      // Treat as detection if it has 'confidence' or 'label' keys
+      if (Object.prototype.hasOwnProperty.call(payload, 'confidence') || Object.prototype.hasOwnProperty.call(payload, 'label')) return true;
+
+      // Telemetry sensor keys commonly present in your logs — treat these as telemetry (not detection)
+      const telemetryKeys = new Set(['weight_g', 'd1', 'd2', 'flooded', 'binFull', 'adc', 'avg', 'id']);
+      // if object has at least one telemetry-only key and no detection keys -> telemetry
+      let hasTelemetry = false;
+      for (const k of Object.keys(payload)) {
+        if (telemetryKeys.has(k)) { hasTelemetry = true; break; }
+      }
+      if (hasTelemetry) return false;
+
+      // otherwise be permissive: if it has any string/array structure but not telemetry, assume detection
+      return true;
+    }
+
+    // fall back to false
+    return false;
+  };
+
   const normalizeLog = (entry) => {
     if (!entry) return null;
     if (typeof entry === 'string') {
@@ -315,24 +315,24 @@ export default function Status() {
 
   // New helper: detect if this log is a retained/placeholder message where the model hasn't produced real detections yet
   const isPendingModel = (log) => {
-  if (!log || !log.raw) return false;
+    if (!log || !log.raw) return false;
 
-  if (log.raw._retained === true) return true;
+    if (log.raw._retained === true) return true;
 
-  // handle wrapped { raw: ... } collector style
-  const nested = (typeof log.raw === 'object' && log.raw.raw !== undefined) ? log.raw.raw : log.raw;
+    // handle wrapped { raw: ... } collector style
+    const nested = (typeof log.raw === 'object' && log.raw.raw !== undefined) ? log.raw.raw : log.raw;
 
-  if (typeof nested === 'string') {
-    const s = nested.trim().toLowerCase();
-    if (s === '' || s === '[]' || s === 'null' || s === 'none') return true;
-  }
+    if (typeof nested === 'string') {
+      const s = nested.trim().toLowerCase();
+      if (s === '' || s === '[]' || s === 'null' || s === 'none') return true;
+    }
 
-  // If classes exist but are explicitly empty => pending
-  if (Array.isArray(log.classes) && log.classes.length === 0) return true;
-  if (typeof log.classes === 'object' && log.classes !== null && Object.keys(log.classes).length === 0) return true;
+    // If classes exist but are explicitly empty => pending
+    if (Array.isArray(log.classes) && log.classes.length === 0) return true;
+    if (typeof log.classes === 'object' && log.classes !== null && Object.keys(log.classes).length === 0) return true;
 
-  return false;
-};
+    return false;
+  };
 
   const getClassLabel = (log) => {
     if (!log) return 'None';
