@@ -37,7 +37,7 @@ export const MetricsProvider = ({ children }) => {
   const BIN_FULL_ALERT_PCT = 90;
 
   // NEW: weight threshold (kg) used to determine binFull when weight is available
-  const BIN_FULL_WEIGHT_KG = 5.0;
+  const BIN_FULL_WEIGHT_KG = 8.0;
 
   const KNOWN_BOOL_KEYS = [
     'online',
@@ -584,3 +584,4 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
+
