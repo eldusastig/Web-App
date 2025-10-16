@@ -239,39 +239,45 @@ export default function Status() {
   };
 
   const normalizeLog = (entry) => {
-    if (!entry) return null;
-    if (typeof entry === 'string') {
-      try {
-        const parsed = JSON.parse(entry);
-        if (parsed && typeof parsed === 'object') return normalizeLog(parsed);
-      } catch (e) {
-        // not JSON
-      }
+  if (!entry) return null;
+  if (typeof entry === 'string') {
+    try {
+      const parsed = JSON.parse(entry);
+      if (parsed && typeof parsed === 'object') return normalizeLog(parsed);
+    } catch (e) {
+      // not JSON
     }
-    if (typeof entry === 'object') {
-      // clone so we can add diagnostic markers without mutating upstream data
-      const raw = { ...entry };
+  }
+  if (typeof entry === 'object') {
+    // clone so we can add diagnostic markers without mutating upstream data
+    const raw = { ...entry };
 
-      const ts = raw.ts ?? raw.time ?? raw.timestamp ?? null;
+    const ts = raw.ts ?? raw.time ?? raw.timestamp ?? null;
 
-      // preserve the original detection-shaped fields for heuristics
-      const rawClassesOriginal = raw.classes ?? raw.detected ?? raw.items ?? raw.labels ?? null;
+    // preserve the original detection-shaped fields for heuristics
+    const rawClassesOriginal = raw.classes ?? raw.detected ?? raw.items ?? raw.labels ?? null;
 
-      // Heuristic: if this object *looks* like a detection payload (or explicitly contains detection keys),
-      // mark it so downstream logic (isPendingModel) can distinguish "no detections yet" from "none".
-      if (isDetectionPayload(raw) || rawClassesOriginal !== null) {
-        raw._detectionTopic = raw._detectionTopic ?? true;
-      }
-
-      // arrival may be set by MQTT collector or server; preserve if present
-      const arrival = raw.arrival ?? null;
-
-      const classes = normalizeClasses(rawClassesOriginal);
-
-      return { ts, classes, arrival, raw };
+    // Record when the source explicitly sent classes: [] so we can treat that as "model ran and found nothing".
+    if (Array.isArray(rawClassesOriginal) && rawClassesOriginal.length === 0) {
+      raw._explicitEmptyClasses = true;
     }
-    return { ts: null, classes: normalizeClasses(String(entry)), arrival: null, raw: entry };
-  };
+
+    // Heuristic: if this object *looks* like a detection payload (or explicitly contains detection keys),
+    // mark it so downstream logic can distinguish "no detections yet" from "none".
+    if (isDetectionPayload(raw) || rawClassesOriginal !== null) {
+      raw._detectionTopic = raw._detectionTopic ?? true;
+    }
+
+    // arrival: preserve if present and numeric-ish, otherwise set to now so each log gets unique arrival
+    const arrival = (raw.arrival && Number(raw.arrival) ? Number(raw.arrival) : raw.arrival) ?? Date.now();
+
+    const classes = normalizeClasses(rawClassesOriginal);
+
+    return { ts, classes, arrival, raw };
+  }
+  return { ts: null, classes: normalizeClasses(String(entry)), arrival: Date.now(), raw: entry };
+};
+
 
   const hasDetections = (log) => {
     if (!log) return false;
@@ -333,63 +339,64 @@ export default function Status() {
   };
 
   // New helper: detect if this log is a retained/placeholder message where the model hasn't produced real detections yet
-  const isPendingModel = (log) => {
-    if (!log || !log.raw) return false;
+ const isPendingModel = (log) => {
+  if (!log || !log.raw) return false;
 
-    // preserved retained marker from broker
-    if (log.raw._retained === true) return true;
+  // preserved retained marker from broker -> placeholder -> pending
+  if (log.raw._retained === true) return true;
 
-    // If this message came from the detection topic and there are no classes,
-    // it's likely the model hasn't produced labels yet -> pending.
-    if (log.raw._detectionTopic && (log.classes === null || log.classes === undefined)) return true;
+  // If the original payload explicitly had classes: [] -> model ran and found nothing -> NOT pending
+  if (log.raw._explicitEmptyClasses) return false;
 
-    // handle wrapped { raw: ... } collector style
-    const nested = (typeof log.raw === 'object' && log.raw.raw !== undefined) ? log.raw.raw : log.raw;
+  // If this message came from the detection topic and there are no classes field at all (undefined),
+  // it's likely the model hasn't produced labels yet -> pending.
+  if (log.raw._detectionTopic && (log.classes === undefined)) return true;
 
-    if (typeof nested === 'string') {
-      const s = nested.trim().toLowerCase();
-      if (s === '' || s === '[]' || s === 'null' || s === 'none') return true;
-    }
+  // handle wrapped { raw: ... } collector style; consider textual empties as pending only when classes undefined
+  const nested = (typeof log.raw === 'object' && log.raw.raw !== undefined) ? log.raw.raw : log.raw;
+  if (typeof nested === 'string') {
+    const s = nested.trim().toLowerCase();
+    if ((s === '' || s === 'null' || s === 'none') && (log.classes === undefined)) return true;
+  }
 
-    // If the original payload contained explicit detection keys but those were empty arrays
-    // we should consider this "awaiting detections" rather than "none".
-    if (typeof nested === 'object' && nested !== null) {
-      const detectionKeys = ['classes', 'detected', 'items', 'labels'];
-      for (const k of detectionKeys) {
-        if (Object.prototype.hasOwnProperty.call(nested, k)) {
-          const val = nested[k];
-          if (Array.isArray(val) && val.length === 0) return true;
-          if (val === null) return true;
-          // sometimes server may send an empty object to indicate no labels yet
-          if (typeof val === 'object' && val !== null && Object.keys(val).length === 0) return true;
-        }
+  // If the original object had detection keys but they were empty objects / missing, consider pending
+  if (typeof nested === 'object' && nested !== null) {
+    const detectionKeys = ['classes', 'detected', 'items', 'labels'];
+    for (const k of detectionKeys) {
+      if (Object.prototype.hasOwnProperty.call(nested, k)) {
+        const val = nested[k];
+        // note: we do NOT treat explicit empty arrays as pending because of _explicitEmptyClasses above
+        if (val === null) return true;
+        if (typeof val === 'object' && val !== null && Object.keys(val).length === 0) return true;
       }
     }
+  }
 
-    // If classes exist but are explicitly empty => pending (fallback check on normalized classes)
-    if (Array.isArray(log.classes) && log.classes.length === 0) return true;
-    if (typeof log.classes === 'object' && log.classes !== null && Object.keys(log.classes).length === 0) return true;
+  return false;
+};
 
-    return false;
-  };
 
-  const getClassLabel = (log) => {
-    if (!log) return 'None';
-    const cls = log.classes;
+ const getClassLabel = (log) => {
+  if (!log) return 'None';
+  const cls = log.classes;
 
-    // PRIORITY: animals always win even if other waste classes are present
-    if (isAnimalClass(cls)) return 'Animal Detected';
+  // If the original payload explicitly contained classes: [] treat that as the model ran and found nothing -> 'None'
+  if (log.raw && log.raw._explicitEmptyClasses) return 'None';
 
-    // If there are non-animal detections, show 'Rubbish Detected'
-    if (hasDetections(log)) return 'Rubbish Detected';
+  // PRIORITY: animals always win even if other waste classes are present
+  if (isAnimalClass(cls)) return 'Animal Detected';
 
-    // If this looks like a retained/placeholder message (model hasn't produced real labels yet)
-    // show an explicit 'Awaiting detections' label instead of defaulting to 'None'.
-    if (isPendingModel(log)) return 'Awaiting detections';
+  // If there are non-animal detections, show 'Rubbish Detected'
+  if (hasDetections(log)) return 'Rubbish Detected';
 
-    // otherwise fallback to 'None'
-    return 'None';
-  };
+  // If this looks like a retained/placeholder message (model hasn't produced real labels yet)
+  // show an explicit 'Awaiting detections' label.
+  if (isPendingModel(log)) return 'Awaiting detections';
+
+  // otherwise fallback to 'None'
+  return 'None';
+};
+
 
   const getClassLabelShort = (log) => getClassLabel(log);
 
