@@ -31,6 +31,9 @@ export default function Status() {
   const pendingPublishesRef = useRef([]);    // queue publishes while disconnected
   const [mqttConnected, setMqttConnected] = useState(false);
 
+  // local UI threshold - keep in sync with MetricsContext.BIN_FULL_WEIGHT_KG
+  const BIN_FULL_WEIGHT_KG = 5.0;
+
   // topics to clear after deleting a device — templates with `{id}` placeholder
   const CLEAR_TOPIC_TEMPLATES = [
     'esp32/{id}/status',
@@ -141,7 +144,9 @@ export default function Status() {
 
   const realTimeAlerts = [];
   devices.forEach((d) => {
-    if (boolish(d.binFull)) realTimeAlerts.push(`⚠️ Bin Full at Device ${d.id}`);
+    // include weight-derived binFull in alerts
+    const isWeightFull = (typeof d.weightKg === 'number' && d.weightKg >= BIN_FULL_WEIGHT_KG);
+    if (boolish(d.binFull) || isWeightFull) realTimeAlerts.push(`⚠️ Bin Full at Device ${d.id}`);
     if (boolish(d.flooded)) realTimeAlerts.push(`🌊 Flood Alert Detected at Device ${d.id}`);
   });
 
@@ -672,7 +677,13 @@ export default function Status() {
   const matchesFilter = (d) => {
     if (!filters || filters.length === 0) return true;
     return filters.some((f) => {
-      if (f === 'fullBin') return boolish(d.binFull) || (d.fillPct != null && Number(d.fillPct) >= 90);
+      if (f === 'fullBin') {
+        // prefer explicit flag, then weight threshold, then legacy fillPct
+        if (boolish(d.binFull)) return true;
+        if (typeof d.weightKg === 'number' && d.weightKg >= BIN_FULL_WEIGHT_KG) return true;
+        if (d.fillPct != null && Number(d.fillPct) >= 90) return true;
+        return false;
+      }
       if (f === 'flood') return boolish(d.flooded);
       if (f === 'active') return boolish(d.active) || boolish(d.online);
       return false;
@@ -798,7 +809,7 @@ export default function Status() {
                   <th>Device ID</th>
                   <th>Street Address</th>
                   <th>Flooded</th>
-                  <th>Bin</th>
+                  <th>Weight (kg)</th>
                   <th>Active</th>
                   <th>Actions</th>
                 </tr>
@@ -824,7 +835,9 @@ export default function Status() {
                         </td>
                         <td>{d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—'}</td>
                         <td className={css(boolish(d.flooded) ? styles.alert : styles.ok)}>{boolish(d.flooded) ? 'Yes' : 'No'}</td>
-                        <td className={css(boolish(d.binFull) ? styles.alert : styles.ok)}>{d.fillPct != null ? `${d.fillPct}%` : '-'}</td>
+                        <td className={css(boolish(d.binFull) ? styles.alert : styles.ok)}>
+                          {typeof d.weightKg === 'number' ? d.weightKg.toFixed(3) : (d.fillPct != null ? `${d.fillPct}%` : '-')}
+                        </td>
                         <td className={css(boolish(d.active) || boolish(d.online) ? styles.ok : styles.alert)}>{boolish(d.active) || boolish(d.online) ? 'Yes' : 'No'}</td>
 
                         <td onClick={(e) => e.stopPropagation()}>
