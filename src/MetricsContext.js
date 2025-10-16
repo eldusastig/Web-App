@@ -115,6 +115,8 @@ export const MetricsProvider = ({ children }) => {
         address: null,
         // canonical weight field (kg)
         weightKg: null,
+        // keep fillPct only for backward compatibility / display if available
+        fillPct: null,
       };
     }
 
@@ -136,25 +138,35 @@ export const MetricsProvider = ({ children }) => {
       if (payload && payload[k] !== undefined && payload[k] !== null) {
         const found = tryNum(payload[k]);
         if (found !== null) {
-          // If key explicitly says grams or value looks large, convert to kg.
-          if (/g$/.test(String(k)) || /_g$/.test(String(k)) || found > 1000) {
+          const keyStr = String(k);
+
+          // If key explicitly contains 'kg' -> treat value as kilograms (no conversion).
+          if (/kg$/i.test(keyStr) || /_kg$/i.test(keyStr) || (/kg/i.test(keyStr) && !/_g$/i.test(keyStr))) {
+            weightKg = found;
+          } else if (/_g$/.test(keyStr) || /(^|_)g$/i.test(keyStr) || found > 1000) {
+            // Keys like weight_g, mass_g, or very large numeric values -> convert grams -> kg
             weightKg = found / 1000.0;
-          } else if (found > 100 && !/kg/i.test(String(k))) {
-            // heuristic: >100 likely grams unless key explicitly contains kg
+          } else if (found > 100 && !/kg/i.test(keyStr)) {
+            // Heuristic: numeric > 100 likely grams unless key contains 'kg'
             weightKg = found / 1000.0;
           } else {
+            // Default: assume numeric is already kg
             weightKg = found;
           }
+
+          if (DEBUG) console.debug('[MetricsContext] parsed weight candidate', { key: keyStr, raw: payload[k], weightKg });
           break;
         }
       }
     }
 
-    // also support payload being a plain numeric value
+    // also support payload being a plain numeric value (if payload itself is a number)
     if (weightKg === null && payload && typeof payload === 'number') {
       const num = tryNum(payload);
       if (num !== null) {
-        weightKg = num > 100 ? num / 1000.0 : num; // heuristic
+        // assume it's kg if small, convert if large (heuristic)
+        weightKg = num > 100 ? num / 1000.0 : num;
+        if (DEBUG) console.debug('[MetricsContext] parsed numeric payload as weight', { raw: payload, weightKg });
       }
     }
 
@@ -180,8 +192,15 @@ export const MetricsProvider = ({ children }) => {
     } else if (weightKg !== null) {
       dev.weightKg = Number(weightKg.toFixed(3));
       dev.binFull = (dev.weightKg >= BIN_FULL_WEIGHT_KG);
+      // Also keep an estimated fillPct from weight if no explicit fill is present (optional)
+      if (dev.fillPct == null) {
+        // Map 0..BIN_FULL_WEIGHT_KG -> 0..90% so threshold remains meaningful
+        const estPct = Math.round(Math.max(0, Math.min(100, (dev.weightKg / BIN_FULL_WEIGHT_KG) * 90)));
+        dev.fillPct = estPct;
+      }
     } else if (pct != null) {
       // maintain backward compatibility: payload that only provides fill% still sets binFull if >= threshold
+      dev.fillPct = pct;
       dev.binFull = pct >= BIN_FULL_ALERT_PCT;
     }
 
@@ -260,7 +279,7 @@ export const MetricsProvider = ({ children }) => {
     const arr = Array.from(map.values()).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
     setDevices(arr);
 
-    if (DEBUG) console.debug('[MetricsContext] updateDeviceFromLog', sid, { lat: dev.lat, lon: dev.lon, binFull: dev.binFull, weightKg: dev.weightKg });
+    if (DEBUG) console.debug('[MetricsContext] updateDeviceFromLog', sid, { lat: dev.lat, lon: dev.lon, binFull: dev.binFull, weightKg: dev.weightKg, fillPct: dev.fillPct });
 
     return isNew;
   }
@@ -500,16 +519,28 @@ export const MetricsProvider = ({ children }) => {
             if (meta[k] !== undefined && meta[k] !== null) {
               const n = Number(meta[k]);
               if (Number.isFinite(n)) {
+                const keyStr = String(k);
                 let wkg = n;
-                if (/g$/.test(String(k)) || /_g$/.test(String(k)) || n > 1000) {
+
+                if (/kg$/i.test(keyStr) || /_kg$/i.test(keyStr) || (/kg/i.test(keyStr) && !/_g$/i.test(keyStr))) {
+                  // value is already in kilograms
+                  wkg = n;
+                } else if (/_g$/.test(keyStr) || /(^|_)g$/i.test(keyStr) || n > 1000) {
+                  // grams-like key or very large number -> convert to kg
                   wkg = n / 1000.0;
-                } else if (n > 100 && !/kg/i.test(String(k))) {
+                } else if (n > 100 && !/kg/i.test(keyStr)) {
+                  // heuristic: >100 likely grams
                   wkg = n / 1000.0;
+                } else {
+                  // otherwise assume already kg
+                  wkg = n;
                 }
+
                 dev.weightKg = Number(wkg.toFixed(3));
                 // update binFull from weight if not already true
                 if (!dev.binFull) dev.binFull = dev.weightKg >= BIN_FULL_WEIGHT_KG;
                 changed = true;
+                if (DEBUG) console.debug('[MetricsContext] merged meta weight', { id, key: keyStr, raw: meta[k], weightKg: dev.weightKg });
                 break;
               }
             }
