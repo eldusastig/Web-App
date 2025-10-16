@@ -36,6 +36,9 @@ export const MetricsProvider = ({ children }) => {
   const MAX_LOGS_PER_DEVICE = 50;
   const BIN_FULL_ALERT_PCT = 90;
 
+  // NEW: weight threshold (kg) used to determine binFull when weight is available
+  const BIN_FULL_WEIGHT_KG = 5.0;
+
   const KNOWN_BOOL_KEYS = [
     'online',
     'active',
@@ -110,6 +113,8 @@ export const MetricsProvider = ({ children }) => {
         lon: null,
         fillPct: null,
         address: null,
+        // new: weight
+        weightKg: null,
       };
     }
 
@@ -117,6 +122,43 @@ export const MetricsProvider = ({ children }) => {
     const payload = (logObj && typeof logObj === 'object') ? normalizePayloadBooleans(logObj) : null;
     const pct = parseFillPct(payload || {});
 
+    // ----- WEIGHT HANDLING: extract weight from payload using common keys and heuristics -----
+    let weightKg = null;
+    const tryNum = (v) => {
+      if (v === undefined || v === null) return null;
+      const n = Number(v);
+      if (!Number.isFinite(n)) return null;
+      return n;
+    };
+
+    const weightCandidates = ['weight_kg', 'weightKg', 'weight', 'wt_kg', 'weight_g', 'mass_g', 'wtg'];
+    for (const k of weightCandidates) {
+      if (payload && payload[k] !== undefined && payload[k] !== null) {
+        const found = tryNum(payload[k]);
+        if (found !== null) {
+          // If key explicitly says grams or value looks large, convert to kg.
+          if (/g$/.test(String(k)) || /_g$/.test(String(k)) || found > 1000) {
+            weightKg = found / 1000.0;
+          } else if (found > 100 && !/kg/i.test(String(k))) {
+            // heuristic: >100 likely grams unless key explicitly contains kg
+            weightKg = found / 1000.0;
+          } else {
+            weightKg = found;
+          }
+          break;
+        }
+      }
+    }
+
+    // also support payload being a plain numeric value
+    if (weightKg === null && payload && typeof payload === 'number') {
+      const num = tryNum(payload);
+      if (num !== null) {
+        weightKg = num > 100 ? num / 1000.0 : num; // heuristic
+      }
+    }
+
+    // ----- Build log entry -----
     const entry = { ...(payload || {}), raw: (!payload ? String(logObj) : undefined) };
     if (entry.ts === undefined || entry.ts === null) entry.ts = now;
     entry.arrival = now;
@@ -127,17 +169,38 @@ export const MetricsProvider = ({ children }) => {
     dev.lastSeen = now;
     dev.online = true;
 
-    if (pct != null) {
-      dev.binFillPct = pct;
-      dev.binFull = pct >= BIN_FULL_ALERT_PCT;
-      // mirror for UI convenience (Status component expects d.fillPct)
-      dev.fillPct = pct;
-    } else if (typeof payload?.binFull === 'boolean') {
+    // ----- BIN DETERMINATION PRIORITY -----
+    // Priority order (configurable behavior):
+    // 1. If payload explicitly includes binFull (boolean) -> respect it.
+    // 2. Else if weight available -> derive binFull from weight >= BIN_FULL_WEIGHT_KG.
+    // 3. Else if fillPct available -> derive from fillPct >= BIN_FULL_ALERT_PCT.
+
+    if (payload && typeof payload.binFull === 'boolean') {
       dev.binFull = payload.binFull;
       dev.binFillPct = payload.binFull ? 100 : dev.binFillPct;
       if (dev.binFillPct !== null) dev.fillPct = dev.binFillPct;
+    } else if (weightKg !== null) {
+      dev.weightKg = Number(weightKg.toFixed(3));
+      // Derive binFull from weight threshold
+      dev.binFull = (dev.weightKg >= BIN_FULL_WEIGHT_KG);
+
+      // Optionally set/estimate fillPct based on weight
+      if (dev.binFull) {
+        dev.binFillPct = 100;
+        dev.fillPct = 100;
+      } else {
+        // Map 0..BIN_FULL_WEIGHT_KG -> 0..90% so threshold remains meaningful
+        const estPct = Math.round(Math.max(0, Math.min(100, (dev.weightKg / BIN_FULL_WEIGHT_KG) * 90)));
+        dev.binFillPct = dev.binFillPct ?? estPct;
+        dev.fillPct = dev.fillPct ?? estPct;
+      }
+    } else if (pct != null) {
+      dev.binFillPct = pct;
+      dev.binFull = pct >= BIN_FULL_ALERT_PCT;
+      dev.fillPct = pct;
     }
 
+    // Flooded
     if (payload && (payload.flooded === true || payload.flood === true)) {
       dev.flooded = true;
     } else if (payload && (payload.flooded === false || payload.flood === false)) {
@@ -212,7 +275,7 @@ export const MetricsProvider = ({ children }) => {
     const arr = Array.from(map.values()).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
     setDevices(arr);
 
-    if (DEBUG) console.debug('[MetricsContext] updateDeviceFromLog', sid, { lat: dev.lat, lon: dev.lon, fillPct: dev.fillPct, binFull: dev.binFull });
+    if (DEBUG) console.debug('[MetricsContext] updateDeviceFromLog', sid, { lat: dev.lat, lon: dev.lon, fillPct: dev.fillPct, binFull: dev.binFull, weightKg: dev.weightKg });
 
     return isNew;
   }
