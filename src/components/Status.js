@@ -212,6 +212,7 @@ export default function Status() {
       const ts = entry.ts ?? entry.time ?? entry.timestamp ?? null;
       const rawClasses = entry.classes ?? entry.detected ?? entry.items ?? entry.labels ?? null;
       const classes = normalizeClasses(rawClasses);
+      // arrival may be set by MQTT collector or server; preserve if present
       const arrival = entry.arrival ?? null;
       return { ts, classes, arrival, raw: entry };
     }
@@ -324,14 +325,19 @@ export default function Status() {
 
   const formatLogTimestamp = (log, device) => {
     const info = parseTsInfo(log?.ts);
+    // mark retained if present so user can tell these were broker-retained messages
+    const retainedNote = log && log.raw && (log.raw._retained === true) ? ' (retained)' : '';
+
     if (info.kind === 'epoch-ms' || info.kind === 'epoch-s' || info.kind === 'iso') {
-      try { return info.date.toLocaleString(); } catch (e) { return info.date.toString(); }
+      try { return info.date.toLocaleString() + retainedNote; } catch (e) { return info.date.toString() + retainedNote; }
     }
     if (info.kind === 'uptime') {
+      // uptime-style timestamps are relative; to show a wall-clock we combine with arrival (when the dashboard received the message)
+      // arrival may be set per-log (recommended). If missing we fall back to device.lastSeen, which makes multiple logs appear with the same timestamp.
       const arrivalMs = (log && log.arrival) || (device && device.lastSeen) || Date.now();
       const estDate = new Date(arrivalMs);
       const uptimeStr = formatUptime(info.uptimeMs);
-      try { return `${estDate.toLocaleString()} (${uptimeStr})`; } catch (e) { return `${estDate.toString()} (${uptimeStr})`; }
+      try { return `${estDate.toLocaleString()} (${uptimeStr})${retainedNote}`; } catch (e) { return `${estDate.toString()} (${uptimeStr})${retainedNote}`; }
     }
     return '—';
   };
@@ -341,6 +347,10 @@ export default function Status() {
     if (rawTs instanceof Date && !isNaN(rawTs)) return { kind: 'epoch-ms', date: rawTs };
     if (typeof rawTs === 'number' || (typeof rawTs === 'string' && /^\d+$/.test(rawTs.trim()))) {
       const n = Number(rawTs);
+      // heuristics:
+      // - epoch ms are >= 1e12 (roughly year 2001+ in ms)
+      // - epoch seconds are >= 1e9 and < 1e12 (year 2001+ in s)
+      // - smaller numbers are likely uptime counters (ms or s depending on device)
       if (n >= 1e12) return { kind: 'epoch-ms', date: new Date(n) };
       if (n >= 1e9 && n < 1e12) return { kind: 'epoch-s', date: new Date(n * 1000) };
       if (n >= 0 && n < 1e9) return { kind: 'uptime', uptimeMs: n };
@@ -376,7 +386,7 @@ export default function Status() {
 
   const renderLogItem = (log, idx, device) => {
     if (!log) return null;
-    const tsStr = log.ts ? formatLogTimestamp(log, device) : '—';
+    const tsStr = log.ts ? formatLogTimestamp(log, device) : (formatLogTimestamp(log, device) || '—');
     // use the new classification-aware label (Animal Detected if any animal class is present)
     const classesLabel = getClassLabel(log);
     return (
@@ -438,7 +448,7 @@ export default function Status() {
     const httpSucceeded = await tryHttpFetch();
     if (httpSucceeded) return;
 
-    // MQTT fallback (unchanged)
+    // MQTT fallback (improved)
     const client = clientRef.current;
     if (!client || !client.connected) {
       setErrorLogs((m) => ({ ...m, [id]: 'MQTT not connected' }));
@@ -457,12 +467,23 @@ export default function Status() {
       try {
         console.debug('[Status MQTT] recv', t, 'retain=', !!(packet && packet.retain), 'qos=', packet ? packet.qos : '-', 'payload=', txt);
       } catch (e) {}
-      let payload = null;
-      try { payload = JSON.parse(txt); } catch (e) { payload = txt; }
-      if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-        payload.arrival = Date.now();
+
+      let parsed = null;
+      try { parsed = JSON.parse(txt); } catch (e) { parsed = txt; }
+
+      // Always attach an arrival timestamp so each log can be shown with a distinct wall-clock when available.
+      const now = Date.now();
+      let payload;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        // preserve any existing arrival from device if present, otherwise set arrival to now
+        payload = { ...parsed, arrival: parsed.arrival ?? now };
+        if (packet && packet.retain) payload._retained = true;
+      } else {
+        // any non-object payloads become objects with raw + arrival so we can track when we received them
+        payload = { raw: parsed, arrival: now };
         if (packet && packet.retain) payload._retained = true;
       }
+
       collected.unshift(payload);
       if (collected.length >= 50) {
         client.removeListener('message', handler);
@@ -484,6 +505,7 @@ export default function Status() {
       }
     });
 
+    // allow a little more time to collect messages from broker; retained messages will all have the same original publish time
     setTimeout(() => {
       try {
         client.removeListener('message', handler);
