@@ -257,14 +257,8 @@ export default function Status() {
       // preserve the original detection-shaped fields for heuristics
       const rawClassesOriginal = raw.classes ?? raw.detected ?? raw.items ?? raw.labels ?? null;
 
-      // Record when the source explicitly sent classes: [] so we can treat that as "model ran and found nothing".
-      if (Array.isArray(rawClassesOriginal) && rawClassesOriginal.length === 0) {
-        raw._explicitEmptyClasses = true;
-      }
-
       // Heuristic: if this object *looks* like a detection payload (or explicitly contains detection keys),
-      // mark it so downstream logic can distinguish "no detections yet" from "none".
-      // NOTE: we avoid inferring a pending state from an explicit empty array — explicit empty arrays are flagged above.
+      // mark it so downstream logic (isPendingModel) can distinguish "no detections yet" from "none".
       if (isDetectionPayload(raw) || rawClassesOriginal !== null) {
         raw._detectionTopic = raw._detectionTopic ?? true;
       }
@@ -342,20 +336,39 @@ export default function Status() {
   const isPendingModel = (log) => {
     if (!log || !log.raw) return false;
 
-    // preserved retained marker from broker -> placeholder -> pending
+    // preserved retained marker from broker
     if (log.raw._retained === true) return true;
 
-    // If this message came from the detection topic but the normalized classes are strictly undefined (i.e. no classes field),
+    // If this message came from the detection topic and there are no classes,
     // it's likely the model hasn't produced labels yet -> pending.
-    // NOTE: explicit classes: [] (which normalizes to null) is NOT considered pending.
-    if (log.raw._detectionTopic && (log.classes === undefined)) return true;
+    if (log.raw._detectionTopic && (log.classes === null || log.classes === undefined)) return true;
 
-    // handle wrapped { raw: ... } collector style; only consider textual empties as pending when classes are undefined
+    // handle wrapped { raw: ... } collector style
     const nested = (typeof log.raw === 'object' && log.raw.raw !== undefined) ? log.raw.raw : log.raw;
+
     if (typeof nested === 'string') {
       const s = nested.trim().toLowerCase();
-      if ((s === '' || s === 'null' || s === 'none') && (log.classes === undefined)) return true;
+      if (s === '' || s === '[]' || s === 'null' || s === 'none') return true;
     }
+
+    // If the original payload contained explicit detection keys but those were empty arrays
+    // we should consider this "awaiting detections" rather than "none".
+    if (typeof nested === 'object' && nested !== null) {
+      const detectionKeys = ['classes', 'detected', 'items', 'labels'];
+      for (const k of detectionKeys) {
+        if (Object.prototype.hasOwnProperty.call(nested, k)) {
+          const val = nested[k];
+          if (Array.isArray(val) && val.length === 0) return true;
+          if (val === null) return true;
+          // sometimes server may send an empty object to indicate no labels yet
+          if (typeof val === 'object' && val !== null && Object.keys(val).length === 0) return true;
+        }
+      }
+    }
+
+    // If classes exist but are explicitly empty => pending (fallback check on normalized classes)
+    if (Array.isArray(log.classes) && log.classes.length === 0) return true;
+    if (typeof log.classes === 'object' && log.classes !== null && Object.keys(log.classes).length === 0) return true;
 
     return false;
   };
@@ -363,9 +376,6 @@ export default function Status() {
   const getClassLabel = (log) => {
     if (!log) return 'None';
     const cls = log.classes;
-
-    // If the original payload explicitly contained classes: [] treat that as the model ran and found nothing -> 'None'
-    if (log.raw && log.raw._explicitEmptyClasses) return 'None';
 
     // PRIORITY: animals always win even if other waste classes are present
     if (isAnimalClass(cls)) return 'Animal Detected';
@@ -481,34 +491,70 @@ export default function Status() {
 
     // HTTP first, then MQTT fallback (unchanged)
     const tryHttpFetch = async () => {
-      try {
-        setLoadingLogs((m) => ({ ...m, [id]: true }));
-        setErrorLogs((m) => ({ ...m, [id]: null }));
+  try {
+    setLoadingLogs((m) => ({ ...m, [id]: true }));
+    setErrorLogs((m) => ({ ...m, [id]: null }));
 
-        const url = `/api/devices/${encodeURIComponent(id)}/logs`;
-        const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-        if (res.status === 404) {
-          setLogsMap((m) => ({ ...m, [id]: [] }));
-          return true;
-        }
-        if (!res.ok) {
-          let body = '';
-          try { body = await res.text(); } catch (e) { body = '<unreadable>'; }
-          setErrorLogs((m) => ({ ...m, [id]: `Failed to load logs: ${res.status} ${res.statusText}` }));
-          console.error('[Status] HTTP logs fetch failed', res.status, body);
-          return false;
-        }
-        const json = await res.json();
-        const normalized = Array.isArray(json) ? json.map(normalizeLog).filter(Boolean) : [normalizeLog(json)].filter(Boolean);
-        setLogsMap((m) => ({ ...m, [id]: normalized }));
-        return true;
-      } catch (err) {
-        console.debug('[Status] HTTP logs fetch error, falling back to MQTT', err);
-        return false;
-      } finally {
-        setLoadingLogs((m) => ({ ...m, [id]: false }));
+    const url = `/api/devices/${encodeURIComponent(id)}/logs`;
+    const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+    if (res.status === 404) {
+      setLogsMap((m) => ({ ...m, [id]: [] }));
+      return true;
+    }
+    if (!res.ok) {
+      let body = '';
+      try { body = await res.text(); } catch (e) { body = '<unreadable>'; }
+      setErrorLogs((m) => ({ ...m, [id]: `Failed to load logs: ${res.status} ${res.statusText}` }));
+      console.error('[Status] HTTP logs fetch failed', res.status, body);
+      return false;
+    }
+
+    const json = await res.json();
+    // Normalize into an array of raw entries
+    const rawEntries = Array.isArray(json) ? json : [json];
+
+    // Filter to only detection-shaped entries:
+    const detectionCandidates = rawEntries.filter((entry) => {
+      if (!entry) return false;
+      // If server already included a marker that this was from detection topic, keep it
+      if (entry._detectionTopic === true) return true;
+
+      // Keep if explicit detection fields exist (even if empty array)
+      const hasDetKeys = ['classes','detected','items','labels'].some(k => Object.prototype.hasOwnProperty.call(entry, k));
+      if (hasDetKeys) return true;
+
+      // If entry is textual JSON that looks like an object/array, keep (some collectors store raw payload string)
+      if (typeof entry === 'string') {
+        const s = entry.trim();
+        if (s.startsWith('{') || s.startsWith('[')) return true;
       }
-    };
+
+      // otherwise drop non-detection telemetry/rows (weight, flood, etc.)
+      return false;
+    });
+
+    // Normalize and ensure each detection entry gets an arrival timestamp
+    let normalized = detectionCandidates.map(normalizeLog).filter(Boolean).map(n => ({ ...n, arrival: n.arrival ?? Date.now() }));
+
+    // (optional) dedupe exact payload duplicates, keep most recent first
+    const seen = new Set();
+    normalized = normalized.filter(n => {
+      const key = JSON.stringify(n.raw ?? n.classes ?? n);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    setLogsMap((m) => ({ ...m, [id]: normalized }));
+    return true;
+  } catch (err) {
+    console.debug('[Status] HTTP logs fetch error, falling back to MQTT', err);
+    return false;
+  } finally {
+    setLoadingLogs((m) => ({ ...m, [id]: false }));
+  }
+};
+
 
     const httpSucceeded = await tryHttpFetch();
     if (httpSucceeded) return;
