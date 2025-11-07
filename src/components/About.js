@@ -11,12 +11,12 @@ const About = () => {
 
   // Prototype album images
   const prototypeImages = [
-    "3D_1.jpg",
-    "3D_2.jpg",
-    "3D_3.jpg",
-    "3D_4.jpg",
-    "3D_5.jpg",
-    "3D_6.jpg",
+    "Ecotrack1.jpg",
+    "Ecotrack2.jpg",
+    "Ecotrack3.jpg",
+    "Ecotrack4.jpg",
+    "Ecotrack5.jpg",
+    "Ecotrack6.jpg",
   ];
 
   return (
