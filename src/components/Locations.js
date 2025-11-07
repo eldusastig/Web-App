@@ -82,8 +82,8 @@ function PanToDevice({ selectedDeviceId, devicesToShow, userMovedMap }) {
 }
 
 export default function Locations() {
-  const { devices } = useContext(DeviceContext);
-  const { locations } = useContext(LocationContext);
+  const { devices } = useContext(DeviceContext); // metadata
+  const { locations } = useContext(LocationContext); // lat/lon from LocationContext
   const [selectedDeviceId, setSelectedDeviceId] = useState(null);
   const [deviceAddresses, setDeviceAddresses] = useState({});
   const [showFlooded, setShowFlooded] = useState(false);
@@ -100,7 +100,7 @@ export default function Locations() {
     return m;
   }, [devices]);
 
-  // merge locations with metadata, add fallback location if GPS data is missing
+  // merge authoritative locations with device metadata
   const mergedDevices = useMemo(() => {
     const out = (locations || []).map((loc) => {
       const id = String(loc.id);
@@ -111,32 +111,22 @@ export default function Locations() {
         lon: Number(loc.lon),
         lastSeen: loc.lastSeen || null,
         flooded: meta.flooded ?? meta.flood ?? false,
-        binFull:
-          meta.binFull ??
-          meta.bin_full ??
-          (meta.fillPct ? Number(meta.fillPct) >= 90 : false),
+        binFull: meta.binFull ?? meta.bin_full ?? (meta.fillPct ? (Number(meta.fillPct) >= 90) : false),
         active: meta.active ?? meta.online ?? true,
         name: meta.name ?? meta.label ?? id,
         rawMeta: meta,
       };
     });
-
-    // If no GPS data, add a hidden fallback device (so it still looks normal)
-    if (out.length === 0) {
-      out.push({
-        id: 'default-device',
-        lat: 14.62577509736046,
-        lon: 121.06171914967487,
-        flooded: false,
-        binFull: false,
-        active: true,
-        name: 'Device 001',
-      });
+    // debug helpers
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug('Locations: mergedDevices', out);
+      const metaWithoutLoc = (devices || []).filter(md => md && md.id && !locations.find(l => String(l.id) === String(md.id)));
+      if (metaWithoutLoc.length) console.debug('Locations: meta devices without GPS', metaWithoutLoc);
     }
-
     return out;
   }, [locations, metaById, devices]);
 
+  // apply filters
   const devicesToShow = useMemo(() => {
     return mergedDevices.filter((d) => {
       if (showInactive && !showFlooded && !showBinFull) return !d.active;
@@ -148,35 +138,47 @@ export default function Locations() {
     });
   }, [mergedDevices, showFlooded, showBinFull, showInactive]);
 
-  // Reverse geocode
-  const fetchQueueRef = useRef(new Map());
+  // simple queue/throttle to avoid firing lots of requests at once
+  const fetchQueueRef = useRef(new Map()); // id -> promise flag
+
   useEffect(() => {
+    // For each visible device with coordinates and no cached address, fetch an address
     devicesToShow.forEach((device, idx) => {
       const { id, lat, lon } = device;
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-      if (deviceAddresses[id]) return;
+      if (deviceAddresses[id]) return; // already cached
+
+      // If a fetch is already pending for this id, skip
       if (fetchQueueRef.current.get(id)) return;
 
+      // polite throttle: stagger requests by index (small delay)
       fetchQueueRef.current.set(id, true);
-      const delayMs = Math.min(2000, idx * 300);
+      const delayMs = Math.min(2000, idx * 300); // stagger, but cap at 2s
       setTimeout(async () => {
         try {
-          const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
-            lat
-          )}&lon=${encodeURIComponent(lon)}`;
-          const res = await fetch(url, { headers: { Accept: 'application/json' } });
+          // build correct URL using template literal (fixed!)
+          const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+          // Debug log
+          if (process.env.NODE_ENV !== 'production') console.debug('Reverse geocoding', id, { lat, lon, url });
+
+          // Nominatim is public and supports CORS; keep usage polite and cache results.
+          const res = await fetch(url, {
+            // do NOT attempt to set 'User-Agent' in browser JS; Nominatim will see a browser UA automatically.
+            headers: {
+              'Accept': 'application/json'
+            },
+          });
           if (!res.ok) {
-            setDeviceAddresses((prev) => ({
-              ...prev,
-              [id]: 'No address (HTTP ' + res.status + ')',
-            }));
+            console.warn('Reverse geocode failed (http)', res.status, res.statusText);
+            setDeviceAddresses(prev => ({ ...prev, [id]: 'No address (HTTP ' + res.status + ')' }));
           } else {
             const data = await res.json();
             const address = data.display_name || 'Unknown location';
-            setDeviceAddresses((prev) => ({ ...prev, [id]: address }));
+            setDeviceAddresses(prev => ({ ...prev, [id]: address }));
           }
-        } catch {
-          setDeviceAddresses((prev) => ({ ...prev, [id]: 'No address found' }));
+        } catch (err) {
+          console.warn('Reverse geocode error for', id, err);
+          setDeviceAddresses(prev => ({ ...prev, [id]: 'No address found' }));
         } finally {
           fetchQueueRef.current.delete(id);
         }
@@ -184,14 +186,12 @@ export default function Locations() {
     });
   }, [devicesToShow, deviceAddresses]);
 
-  // initial map position (looks like it comes from data)
   const initialCenter = useMemo(() => {
-    if (devicesToShow.length > 0)
-      return [devicesToShow[0].lat, devicesToShow[0].lon];
-    return [14.62577509736046, 121.06171914967487];
+    if (devicesToShow.length > 0) return [devicesToShow[0].lat, devicesToShow[0].lon];
+    return [0, 0];
   }, [devicesToShow]);
 
-  const initialZoom = useMemo(() => (devicesToShow.length > 0 ? 15 : 15), [devicesToShow]);
+  const initialZoom = useMemo(() => (devicesToShow.length > 0 ? 15 : 2), [devicesToShow]);
 
   return (
     <div style={styles.container}>
@@ -234,9 +234,7 @@ export default function Locations() {
           zoom={initialZoom}
           scrollWheelZoom={true}
           style={{ height: '400px', width: '100%' }}
-          whenCreated={() => {
-            userMovedMap.current = false;
-          }}
+          whenCreated={() => { userMovedMap.current = false; }}
         >
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
@@ -257,9 +255,7 @@ export default function Locations() {
                 <Popup>
                   <b>{device.name || device.id}</b>
                   <br />
-                  {address
-                    ? address
-                    : `${device.lat.toFixed(6)}, ${device.lon.toFixed(6)}`}
+                  {address ? address : `${device.lat.toFixed(6)}, ${device.lon.toFixed(6)}`}
                   <br />
                   Flooded: {device.flooded ? 'Yes' : 'No'}
                   <br />
@@ -297,9 +293,7 @@ export default function Locations() {
                   alignItems: 'center',
                 }}
               >
-                <span style={styles.deviceName}>
-                  {device.name || device.id}
-                </span>
+                <span style={styles.deviceName}>{device.name || device.id}</span>
                 <button
                   style={styles.viewButton}
                   onClick={() => {
