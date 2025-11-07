@@ -206,7 +206,7 @@ const styles = {
     marginTop: '20px',
   },
   albumItem: {
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#0F172A',
     padding: '10px',
     borderRadius: '10px',
     boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
