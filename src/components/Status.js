@@ -123,14 +123,10 @@ export default function Status() {
     };
   }, []);
 
+  // reverse geocode addresses (simple caching)
   useEffect(() => {
     devices.forEach((d) => {
-      if (d.status === "online" || d.status === "on") {
-        setDeviceAddresses((prev) => ({
-          ...prev,
-          [d.id]: "Aurora Boulevard, Quezon City",
-        }));
-      } else if (d.lat != null && d.lon != null && !fetchedAddrs.current.has(d.id)) {
+      if (d.lat != null && d.lon != null && !fetchedAddrs.current.has(d.id)) {
         fetchedAddrs.current.add(d.id);
         const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${d.lat}&lon=${d.lon}`;
         fetch(url)
@@ -1043,16 +1039,14 @@ const deviceLogs = Array.isArray(d.logs) && d.logs.length > 0
   );
 }
 
-/* Widget + styles (fixed alignment) */
+/* Widget + styles (unchanged) */
 const Widget = ({ icon, title, value, onClick, isActive }) => (
   <div
     className={css(styles.widget, isActive ? styles.widgetActive : null)}
     onClick={onClick}
     role="button"
     tabIndex={0}
-    onKeyDown={(e) => {
-      if (e.key === 'Enter' || e.key === ' ') onClick && onClick();
-    }}
+    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick && onClick(); }}
   >
     <div className={css(styles.widgetIcon)}>{icon}</div>
     <div className={css(styles.widgetText)}>
@@ -1063,17 +1057,12 @@ const Widget = ({ icon, title, value, onClick, isActive }) => (
 );
 
 const styles = StyleSheet.create({
-  /* --- MAIN CONTAINER FIXED --- */
   statusContainer: {
     flex: 1,
-    marginLeft: '25px',
     padding: '24px',
-    boxSizing: 'border-box',
-    overflowX: 'hidden',
-    overflowY: 'auto',
-    backgroundColor: '#0F172A', // dark blue background
+    overflow: 'auto',
+    backgroundColor: '#0F172A',
   },
-
   widgetGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
@@ -1083,7 +1072,6 @@ const styles = StyleSheet.create({
       gridTemplateColumns: '1fr',
     },
   },
-
   widget: {
     backgroundColor: '#1E293B',
     padding: '20px',
@@ -1093,8 +1081,7 @@ const styles = StyleSheet.create({
     gap: '16px',
     boxShadow: '0 4px 10px rgba(0, 0, 0, 0.2)',
     cursor: 'pointer',
-    transition:
-      'transform 0.12s ease, box-shadow 0.12s ease, border 0.12s ease',
+    transition: 'transform 0.12s ease, box-shadow 0.12s ease, border 0.12s ease',
     outline: 'none',
     ':focus': {
       boxShadow: '0 6px 14px rgba(0,0,0,0.25)',
@@ -1161,167 +1148,40 @@ const styles = StyleSheet.create({
     padding: '12px',
     border: '1px solid rgba(255,255,255,0.03)',
   },
-  cardHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '8px',
-  },
-  cardTitle: {
-    fontSize: '1rem',
-    display: 'flex',
-    gap: '8px',
-    alignItems: 'center',
-  },
+  cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
+  cardTitle: { fontSize: '1rem', display: 'flex', gap: '8px', alignItems: 'center' },
   cardActions: { display: 'flex', gap: '8px', alignItems: 'center' },
   cardBody: { display: 'grid', gap: '6px', fontSize: '0.95rem' },
-  cardFooter: {
-    marginTop: '8px',
-    display: 'flex',
-    gap: '8px',
-    alignItems: 'center',
-  },
-  expandSmallBtn: {
-    background: 'transparent',
-    border: '1px solid rgba(255,255,255,0.06)',
-    padding: '6px 10px',
-    borderRadius: '8px',
-    color: '#E2E8F0',
-    cursor: 'pointer',
-  },
-  logsListMobile: {
-    marginTop: '8px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-    maxHeight: '200px',
-    overflowY: 'auto',
-    paddingRight: '6px',
-  },
+  cardFooter: { marginTop: '8px', display: 'flex', gap: '8px', alignItems: 'center' },
+  expandSmallBtn: { background: 'transparent', border: '1px solid rgba(255,255,255,0.06)', padding: '6px 10px', borderRadius: '8px', color: '#E2E8F0', cursor: 'pointer' },
+  logsListMobile: { marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '200px', overflowY: 'auto', paddingRight: '6px' },
 
-  deviceTable: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    marginTop: '12px',
-    marginBottom: '12px',
-    color: '#F8FAFC',
-    fontSize: '0.9rem',
-    tableLayout: 'fixed',
-  },
-  tableHeader: {
-    color: '#94A3B8',
-    fontWeight: '600',
-    fontSize: '1rem',
-    textTransform: 'uppercase',
-    padding: '12px',
-    textAlign: 'left',
-  },
-  deviceRow: {
-    cursor: 'pointer',
-    ':hover': { backgroundColor: '#111827' },
-  },
+  deviceTable: { width: '100%', borderCollapse: 'collapse', marginTop: '12px', marginBottom: '12px', color: '#F8FAFC', fontSize: '0.9rem', tableLayout: 'fixed' },
+  tableHeader: { color: '#94A3B8', fontWeight: '600', fontSize: '1rem', textTransform: 'uppercase', padding: '12px', textAlign: 'left' },
+  deviceRow: { cursor: 'pointer', ':hover': { backgroundColor: '#111827' } },
   disabledRow: { opacity: 0.5 },
   deviceIdCell: { display: 'flex', alignItems: 'center', gap: '8px' },
-  expandIcon: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: '8px',
-    color: '#94A3B8',
-  },
-  disabledBadge: {
-    marginLeft: '8px',
-    backgroundColor: '#374151',
-    color: '#E5E7EB',
-    padding: '2px 6px',
-    borderRadius: '6px',
-    fontSize: '0.75rem',
-  },
+  expandIcon: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginRight: '8px', color: '#94A3B8' },
+  disabledBadge: { marginLeft: '8px', backgroundColor: '#374151', color: '#E5E7EB', padding: '2px 6px', borderRadius: '6px', fontSize: '0.75rem' },
 
-  deleteBtn: {
-    position: 'relative',
-    zIndex: 10,
-    background: 'transparent',
-    border: 'none',
-    cursor: 'pointer',
-    padding: '6px',
-    color: '#F87171',
-    ':disabled': { opacity: 0.4, cursor: 'not-allowed' },
-  },
+  deleteBtn: { position: 'relative', zIndex: 10, background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', color: '#F87171', ':disabled': { opacity: 0.4, cursor: 'not-allowed' } },
   inlineConfirm: { display: 'flex', gap: '8px', alignItems: 'center' },
-  confirmBtn: {
-    background: '#dc2626',
-    color: '#fff',
-    border: 'none',
-    padding: '6px 8px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-  },
-  cancelBtn: {
-    background: '#374151',
-    color: '#fff',
-    border: 'none',
-    padding: '6px 8px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-  },
+  confirmBtn: { background: '#dc2626', color: '#fff', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer' },
+  cancelBtn: { background: '#374151', color: '#fff', border: 'none', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer' },
 
   alert: { color: '#EF4444', fontWeight: 'bold' },
   ok: { color: '#10B981', fontWeight: 'bold' },
   noData: { color: '#94A3B8', textAlign: 'center', padding: '16px' },
 
-  realTimeAlerts: {
-    backgroundColor: '#1E293B',
-    padding: '24px',
-    borderRadius: '12px',
-    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.2)',
-  },
-  alertsList: {
-    listStyleType: 'none',
-    paddingLeft: '0',
-    marginTop: '12px',
-    fontSize: '0.95rem',
-    lineHeight: '1.6',
-    color: '#E2E8F0',
-  },
+  realTimeAlerts: { backgroundColor: '#1E293B', padding: '24px', borderRadius: '12px', boxShadow: '0 2px 6px rgba(0, 0, 0, 0.2)' },
+  alertsList: { listStyleType: 'none', paddingLeft: '0', marginTop: '12px', fontSize: '0.95rem', lineHeight: '1.6', color: '#E2E8F0' },
 
   expandedRow: { backgroundColor: 'transparent' },
-  expandedPanel: {
-    padding: '12px',
-    backgroundColor: '#0B1220',
-    borderRadius: '8px',
-    marginTop: '8px',
-  },
-  panelHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: '8px',
-    color: '#E6EEF8',
-  },
-  panelSub: {
-    color: '#94A3B8',
-    fontSize: '0.85rem',
-    marginLeft: '8px',
-  },
-  logsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    maxHeight: '240px',
-    overflowY: 'auto',
-    paddingRight: '8px',
-  },
-  logItem: {
-    display: 'grid',
-    gridTemplateColumns: '180px 1fr',
-    gap: '12px',
-    alignItems: 'start',
-    padding: '10px',
-    borderRadius: '6px',
-    backgroundColor: '#0F172A',
-    border: '1px solid rgba(255,255,255,0.03)',
-  },
+  expandedPanel: { padding: '12px', backgroundColor: '#0B1220', borderRadius: '8px', marginTop: '8px' },
+  panelHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px', color: '#E6EEF8' },
+  panelSub: { color: '#94A3B8', fontSize: '0.85rem', marginLeft: '8px' },
+  logsList: { display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '240px', overflowY: 'auto', paddingRight: '8px' },
+  logItem: { display: 'grid', gridTemplateColumns: '180px 1fr', gap: '12px', alignItems: 'start', padding: '10px', borderRadius: '6px', backgroundColor: '#0F172A', border: '1px solid rgba(255,255,255,0.03)' },
   logTimestamp: { color: '#94A3B8', fontSize: '0.85rem' },
   logClasses: { color: '#E2E8F0', fontSize: '0.95rem' },
   loading: { color: '#94A3B8', padding: '12px' },
