@@ -125,7 +125,7 @@ export default function Status() {
 
   useEffect(() => {
     devices.forEach((d) => {
-      if (d.id === "006") {
+      if (d.id === "1") {
         // Fixed address for device ID 006
         setDeviceAddresses((prev) => ({
           ...prev,
