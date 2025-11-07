@@ -242,7 +242,9 @@ const styles = {
   },
   lightboxImg: {
     width: '100%',
-    height: 'auto',
+    height: '100%',
+    maxHeight: '85vh',
+    objectFit: 'contain',
     borderRadius: '8px',
   },
   closeBtn: {
