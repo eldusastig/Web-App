@@ -123,10 +123,15 @@ export default function Status() {
     };
   }, []);
 
-  // reverse geocode addresses (simple caching)
   useEffect(() => {
     devices.forEach((d) => {
-      if (d.lat != null && d.lon != null && !fetchedAddrs.current.has(d.id)) {
+      if (d.id === "006") {
+        // Fixed address for device ID 006
+        setDeviceAddresses((prev) => ({
+          ...prev,
+          [d.id]: "Aurora Boulevard", // your chosen fixed address
+        }));
+      } else if (d.lat != null && d.lon != null && !fetchedAddrs.current.has(d.id)) {
         fetchedAddrs.current.add(d.id);
         const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${d.lat}&lon=${d.lon}`;
         fetch(url)
