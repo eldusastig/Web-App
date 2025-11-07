@@ -1,4 +1,4 @@
-import React from 'react'; 
+import React from 'react';
 
 const About = () => {
   const developers = [
@@ -7,6 +7,16 @@ const About = () => {
     { name: "Jethro Duque", course: "BS Computer Engineering", desc: "Specializes in Railway Engineering.", img: "Duque.jpg" },
     { name: "Rens Españo", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Espano.png" },
     { name: "Justin Jello Repani", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Repani.png" },
+  ];
+
+  // Prototype album images
+  const prototypeImages = [
+    "3D_1.jpg",
+    "3D_2.jpg",
+    "3D_3.jpg",
+    "3D_4.jpg",
+    "3D_5.jpg",
+    "3D_6.jpg",
   ];
 
   return (
@@ -56,11 +66,15 @@ const About = () => {
 
       {/* Prototype Section */}
       <div style={styles.sectionHeader}>Prototype</div>
-      <div style={styles.prototypeContainer}>
-        <img src="Ecotrack2.jpg" alt="Prototype" style={styles.prototypeImg} />
+      <div style={styles.albumContainer}>
+        {prototypeImages.map((img, index) => (
+          <div key={index} style={styles.albumItem}>
+            <img src={img} alt={`3D Prototype ${index + 1}`} style={styles.albumImg} />
+          </div>
+        ))}
       </div>
 
-      {/* Extra CSS for hover effects */}
+      {/* Hover Effects */}
       <style>
         {`
           .dev-card {
@@ -68,7 +82,7 @@ const About = () => {
           }
           .dev-card:hover {
             transform: translateY(-8px);
-            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
           }
           .dev-img {
             transition: transform 0.3s ease;
@@ -143,10 +157,11 @@ const styles = {
     marginBottom: '50px',
   },
   devCard: {
-    backgroundColor: '#fdfdfd',
+    backgroundColor: '#0F172A',
+    color: '#ffffff',
     padding: '25px',
     borderRadius: '12px',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
     textAlign: 'center',
     width: '100%',
     maxWidth: '280px',
@@ -162,30 +177,35 @@ const styles = {
     fontSize: '1.3rem',
     fontWeight: '600',
     marginBottom: '6px',
-    color: '#2c3e50',
   },
   devCourse: {
     fontSize: '1rem',
     fontWeight: '500',
-    color: '#444',
     marginBottom: '10px',
   },
   devDesc: {
     fontSize: '0.95rem',
-    color: '#666',
     lineHeight: '1.5',
   },
-  prototypeContainer: {
-    display: 'flex',
-    justifyContent: 'center',
+  albumContainer: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '20px',
+    justifyItems: 'center',
     marginTop: '20px',
   },
-  prototypeImg: {
+  albumItem: {
+    backgroundColor: '#f9f9f9',
+    padding: '10px',
+    borderRadius: '10px',
+    boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
+    transition: 'transform 0.3s ease',
+  },
+  albumImg: {
     width: '100%',
-    maxWidth: '650px',
-    height: 'auto',
-    borderRadius: '12px',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+    height: '200px',
+    objectFit: 'cover',
+    borderRadius: '8px',
   },
 };
 
