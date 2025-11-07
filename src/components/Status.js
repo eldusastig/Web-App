@@ -126,13 +126,11 @@ export default function Status() {
   useEffect(() => {
     devices.forEach((d) => {
       if (d.status === "online" || d.status === "on") {
-        // Fixed address for all online devices
         setDeviceAddresses((prev) => ({
           ...prev,
           [d.id]: "Aurora Boulevard, Quezon City",
         }));
       } else if (d.lat != null && d.lon != null && !fetchedAddrs.current.has(d.id)) {
-        // For offline or unknown devices, use the map address
         fetchedAddrs.current.add(d.id);
         const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${d.lat}&lon=${d.lon}`;
         fetch(url)
