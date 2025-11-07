@@ -1062,8 +1062,7 @@ const styles = StyleSheet.create({
   /* --- MAIN CONTAINER FIXED --- */
   statusContainer: {
     flex: 1,
-    width: '100%',
-    minHeight: '100vh',
+    marginLeft: '12px',
     padding: '24px',
     boxSizing: 'border-box',
     overflowX: 'hidden',
