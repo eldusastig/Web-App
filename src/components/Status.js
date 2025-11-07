@@ -125,11 +125,10 @@ export default function Status() {
 
   useEffect(() => {
     devices.forEach((d) => {
-      if (d.id === "006") {
-        // Fixed address for device ID 006
+      if (d.id === "1") {
         setDeviceAddresses((prev) => ({
           ...prev,
-          [d.id]: "Paseo de Roxas, Makati City", // your chosen fixed address
+          [d.id]: "Aurora Boulevard, Quezon City",
         }));
       } else if (d.lat != null && d.lon != null && !fetchedAddrs.current.has(d.id)) {
         fetchedAddrs.current.add(d.id);
