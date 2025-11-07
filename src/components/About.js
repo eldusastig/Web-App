@@ -217,7 +217,7 @@ const styles = {
     width: '100%',
     height: '200px',
     objectFit: 'cover',
-    borderRadius: '8px',
+    borderRadius: '5px',
   },
   overlay: {
     position: 'fixed',
@@ -241,11 +241,11 @@ const styles = {
     maxHeight: '80%',
   },
   lightboxImg: {
-    width: '100%',
-    height: '100%',
-    maxHeight: '85vh',
+    width: '90%',
+    height: '90%',
+    maxHeight: '70vh',
     objectFit: 'contain',
-    borderRadius: '8px',
+    borderRadius: '5px',
   },
   closeBtn: {
     position: 'absolute',
