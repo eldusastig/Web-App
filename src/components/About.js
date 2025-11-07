@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 const About = () => {
+  const [selectedImage, setSelectedImage] = useState(null);
+
   const developers = [
     { name: "Dhafny Buenafe", course: "BS Computer Engineering", desc: "Specializes in Intelligent Systems.", img: "Buenafe.png" },
     { name: "Patrick Jordan Cabanatan", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Cabanatan.png" },
@@ -9,7 +11,6 @@ const About = () => {
     { name: "Justin Jello Repani", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Repani.png" },
   ];
 
-  // Prototype album images
   const prototypeImages = [
     "Ecotrack1.jpg",
     "Ecotrack2.jpg",
@@ -21,7 +22,7 @@ const About = () => {
 
   return (
     <div style={styles.container}>
-      {/* Centered logo before the About header */}
+      {/* Logo */}
       <div style={styles.topImageContainer}>
         <img src="EcotrackLogo.png" alt="Debris Detection System" style={styles.topImage} />
       </div>
@@ -54,7 +55,7 @@ const About = () => {
         ))}
       </div>
 
-      {/* Fifth developer centered below */}
+      {/* Fifth Developer */}
       <div style={styles.devCenter}>
         <div style={styles.devCard} className="dev-card">
           <img src={developers[4].img} alt={developers[4].name} style={styles.devImg} className="dev-img" />
@@ -64,15 +65,25 @@ const About = () => {
         </div>
       </div>
 
-      {/* Prototype Section */}
+      {/* Prototype Album */}
       <div style={styles.sectionHeader}>Prototype</div>
       <div style={styles.albumContainer}>
         {prototypeImages.map((img, index) => (
-          <div key={index} style={styles.albumItem}>
+          <div key={index} style={styles.albumItem} onClick={() => setSelectedImage(img)}>
             <img src={img} alt={`3D Prototype ${index + 1}`} style={styles.albumImg} />
           </div>
         ))}
       </div>
+
+      {/* Popup Lightbox */}
+      {selectedImage && (
+        <div style={styles.overlay} onClick={() => setSelectedImage(null)}>
+          <div style={styles.lightbox}>
+            <img src={selectedImage} alt="Enlarged 3D" style={styles.lightboxImg} />
+            <button style={styles.closeBtn} onClick={() => setSelectedImage(null)}>×</button>
+          </div>
+        </div>
+      )}
 
       {/* Hover Effects */}
       <style>
@@ -200,12 +211,49 @@ const styles = {
     borderRadius: '10px',
     boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
     transition: 'transform 0.3s ease',
+    cursor: 'pointer',
   },
   albumImg: {
     width: '100%',
     height: '200px',
     objectFit: 'cover',
     borderRadius: '8px',
+  },
+  overlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+  },
+  lightbox: {
+    position: 'relative',
+    backgroundColor: '#fff',
+    padding: '20px',
+    borderRadius: '12px',
+    boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
+    maxWidth: '80%',
+    maxHeight: '80%',
+  },
+  lightboxImg: {
+    width: '100%',
+    height: 'auto',
+    borderRadius: '8px',
+  },
+  closeBtn: {
+    position: 'absolute',
+    top: '10px',
+    right: '15px',
+    background: 'transparent',
+    border: 'none',
+    fontSize: '2rem',
+    color: '#333',
+    cursor: 'pointer',
   },
 };
 
