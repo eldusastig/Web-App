@@ -125,13 +125,13 @@ export default function Status() {
 
   useEffect(() => {
     devices.forEach((d) => {
-      if (d.status === "active") {
+      if (String(d.id).padStart(3, '0') === "006") {
         setDeviceAddresses((prev) => ({
           ...prev,
           [d.id]: "Aurora Boulevard, Quezon City",
         }));
-      } else if (d.lat != null && d.lon != null && !fetchedAddrs.current.has(d.id)) {
-        // Fetch address for non-active devices
+      } 
+      else if (d.lat != null && d.lon != null && !fetchedAddrs.current.has(d.id)) {
         fetchedAddrs.current.add(d.id);
         const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${d.lat}&lon=${d.lon}`;
         fetch(url)
