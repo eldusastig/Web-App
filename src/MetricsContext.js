@@ -47,6 +47,8 @@ export const MetricsProvider = ({ children }) => {
     'binFull',
     'bin_full',
     'bin_full_flag',
+    'collectionError',
+    'collection_error',
   ];
 
   function normalizePayloadBooleans(p) {
@@ -108,6 +110,7 @@ export const MetricsProvider = ({ children }) => {
         logs: [],
         // binFull remains as boolean flag either from payload or derived from weight
         binFull: false,
+        collectionError: false,   
         flooded: false,
         // placeholders used by UI
         lat: null,
@@ -209,6 +212,13 @@ export const MetricsProvider = ({ children }) => {
       dev.flooded = true;
     } else if (payload && (payload.flooded === false || payload.flood === false)) {
       dev.flooded = false;
+    }
+    // Collection Error
+    if (payload && typeof payload.collectionError === 'boolean') {
+      dev.collectionError = payload.collectionError;
+    }
+    if (payload && typeof payload.collection_error === 'boolean') {
+      dev.collectionError = payload.collection_error;
     }
 
     // Merge shallow metadata from payload
@@ -584,4 +594,5 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
+
 
