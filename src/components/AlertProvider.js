@@ -246,10 +246,12 @@ export default function AlertProvider({ children }) {
                 <div style={{ marginTop: 8 }}>
                   <strong>Troubleshooting:</strong>
                   <ul style={{ margin: '6px 0 0 16px' }}>
-                    <li>Turn off the power </li>
-                    <li>Inspect sensor wiring</li>
-                    <li>Restart the device</li>
+                    <li>Turn the switch off </li>
+                    <li>Remove the Chain from the Motor</li>
+                    <li>Twist the pipe to bring the plate down</li>
                     <li>Check for physical blockage</li>
+                    <li>Put back the chain to the cog in the motor</li>
+                    <li>Turn the protoype back on</li>
                   </ul>
                 </div>
               </div>
