@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+} from 'react';
 import { MetricsContext } from '../MetricsContext';
 import { StyleSheet, css } from 'aphrodite';
 
@@ -74,7 +81,9 @@ export default function AlertProvider({ children }) {
     if (!ctx) return;
 
     if (ctx.state === 'suspended') {
-      try { await ctx.resume(); } catch {}
+      try {
+        await ctx.resume();
+      } catch {}
     }
 
     try {
@@ -98,36 +107,42 @@ export default function AlertProvider({ children }) {
       o.stop(now + 1.25);
 
       o.onended = () => {
-        try { o.disconnect(); } catch {}
-        try { g.disconnect(); } catch {}
+        try {
+          o.disconnect();
+        } catch {}
+        try {
+          g.disconnect();
+        } catch {}
       };
     } catch (e) {
       console.warn('siren failed', e);
     }
   };
 
-  const startAlarmLoop = () => {
+  const startAlarmLoop = useCallback(() => {
     if (audioLoopRef.current || muted) return;
     playSirenOnce();
     audioLoopRef.current = window.setInterval(playSirenOnce, 3000);
-  };
+  }, [muted]);
 
-  const stopAlarmLoop = () => {
+  const stopAlarmLoop = useCallback(() => {
     if (audioLoopRef.current) {
       clearInterval(audioLoopRef.current);
       audioLoopRef.current = null;
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (muted) {
       stopAlarmLoop();
       return;
     }
+
     if (popups.length > 0) startAlarmLoop();
     else stopAlarmLoop();
+
     return () => stopAlarmLoop();
-  }, [popups.length, muted]);
+  }, [popups.length, muted, startAlarmLoop, stopAlarmLoop]);
 
   // -----------------------
   // Notifications
@@ -184,13 +199,11 @@ export default function AlertProvider({ children }) {
         normalMsgs.push(`🌊 Flood Alert at Device ${d.id}`);
       }
 
-      // ⭐ Custom collection error popup
       if (boolish(d.collectionError)) {
         errorPopups.push(d);
       }
     });
 
-    // fire normal alerts
     normalMsgs.forEach((msg) => {
       const last = alertedRef.current.get(msg) || 0;
       if (now - last < ALERT_DEBOUNCE_MS) return;
@@ -204,7 +217,6 @@ export default function AlertProvider({ children }) {
       safeShowNotification('Alert', msg);
     });
 
-    // fire collection error alerts
     errorPopups.forEach((device) => {
       const key = `collectionError:${device.id}`;
       const last = alertedRef.current.get(key) || 0;
@@ -221,8 +233,7 @@ export default function AlertProvider({ children }) {
         `${device.name || device.id} requires attention`
       );
     });
-
-  }, [JSON.stringify(devices)]);
+  }, [devices]);
 
   // -----------------------
   // Render
@@ -240,11 +251,13 @@ export default function AlertProvider({ children }) {
                   🚨 Collection Error
                 </div>
 
-                <div><strong>Device:</strong> {p.device.name || p.device.id}</div>
+                <div>
+                  <strong>Device:</strong> {p.device.name || p.device.id}
+                </div>
                 <div style={{ marginTop: 8 }}>
                   <strong>Troubleshooting:</strong>
                   <ul style={{ margin: '6px 0 0 16px' }}>
-                    <li>Turn the switch off </li>
+                    <li>Turn the switch off</li>
                     <li>Check if the chain is properly aligned</li>
                     <li>Check if the weight of the object exceeded</li>
                     <li>Check for physical blockage</li>
