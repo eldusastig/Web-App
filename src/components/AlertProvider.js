@@ -120,7 +120,7 @@ const playSirenOnce = useCallback(async () => {
     if (audioLoopRef.current || muted) return;
     playSirenOnce();
     audioLoopRef.current = window.setInterval(playSirenOnce, 3000);
-  }, [muted]);
+  }, [muted,playSirenOnce]);
 
   const stopAlarmLoop = useCallback(() => {
     if (audioLoopRef.current) {
