@@ -241,17 +241,15 @@ export default function AlertProvider({ children }) {
                 </div>
 
                 <div><strong>Device:</strong> {p.device.name || p.device.id}</div>
-                <div><strong>Location:</strong> {p.device.location || 'Unknown'}</div>
-
                 <div style={{ marginTop: 8 }}>
                   <strong>Troubleshooting:</strong>
                   <ul style={{ margin: '6px 0 0 16px' }}>
                     <li>Turn the switch off </li>
-                    <li>Remove the Chain from the Motor</li>
-                    <li>Twist the pipe to bring the plate down</li>
+                    <li>Check if the chain is properly aligned</li>
+                    <li>Check if the weight of the object exceeded</li>
                     <li>Check for physical blockage</li>
-                    <li>Put back the chain to the cog in the motor</li>
-                    <li>Turn the protoype back on</li>
+                    <li>Check if the motor is working properly</li>
+                    <li>Check if there is something stuck</li>
                   </ul>
                 </div>
               </div>
