@@ -26,7 +26,7 @@ function normalizeLatLon(latRaw, lonRaw) {
 
   const latValid = Math.abs(a) <= 90;
   const lonValid = Math.abs(b) <= 180;
-  const swappedLikely = (!latValid && Math.abs(b) <= 90);
+  const swappedLikely = (!latValid && !lonValid && Math.abs(b) <= 90);
   if (swappedLikely) return { lat: b, lon: a };
   return { lat: a, lon: b };
 }
@@ -363,7 +363,7 @@ export const LocationProvider = ({ children }) => {
     })();
 
     return () => { aborted = true; };
-  }, [database]);
+  }, []);
 
   // MQTT: listen and extract lat/lon messages
   useEffect(() => {
@@ -441,7 +441,7 @@ export const LocationProvider = ({ children }) => {
       try { client.end(true); } catch (e) {}
       clientRef.current = null;
     };
-  }, []);
+  }, [extractIdFromTopicAndPayload, updateDeviceLocation]);
 
   // Periodic prune: mark offline devices and attempt DB fallback merge for those IDs
   useEffect(() => {
@@ -575,3 +575,4 @@ export const LocationProvider = ({ children }) => {
     </LocationContext.Provider>
   );
 };
+
