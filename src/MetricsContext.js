@@ -297,6 +297,10 @@ export const MetricsProvider = ({ children }) => {
   const pushDeviceLog = (deviceId, logObj) => {
     if (!deviceId) return;
     updateDeviceFromLog(deviceId, logObj);
+    const dev = devicesMapRef.current.get(deviceId);
+    if (dev && dev.collectionError === true) {
+    dev.collectionError = false; // ⚡ reset after handling
+    if (DEBUG) console.debug('[MetricsContext] collectionError reset for', deviceId);
   };
 
   useEffect(() => {
@@ -594,5 +598,6 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
+
 
 
