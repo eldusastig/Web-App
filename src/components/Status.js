@@ -324,13 +324,13 @@ const filterAndNormalizeDeviceLogs = (logs) => {
     if (!log) return false;
     const cls = log.classes;
     if (!cls) return false;
-    if (Array.isArray(cls)) return cls.length > 0;
+    if (Array.isArray(cls)) return cls.length >= 2;
     if (typeof cls === 'string') {
       const s = cls.trim().toLowerCase();
       if (s === '' || s === 'none' || s === 'null') return false;
       return true;
     }
-    if (typeof cls === 'object') return Object.keys(cls).length > 0;
+    if (typeof cls === 'object') return Object.keys(cls).length >= 2;
     try { return String(cls).trim() !== ''; } catch (e) { return false; }
   };
 
