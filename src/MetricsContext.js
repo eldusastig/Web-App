@@ -294,15 +294,30 @@ export const MetricsProvider = ({ children }) => {
     return isNew;
   }
 
-  const pushDeviceLog = (deviceId, logObj) => {
-    if (!deviceId) return;
-    updateDeviceFromLog(deviceId, logObj);
-    const dev = devicesMapRef.current.get(deviceId);
-    if (dev && dev.collectionError === true) {
-    dev.collectionError = false; // ⚡ reset after handling
-      if (DEBUG) console.debug('[MetricsContext] collectionError reset for', deviceId);
-    }
-  };
+const pushDeviceLog = (deviceId, logObj) => {
+  if (!deviceId) return;
+  updateDeviceFromLog(deviceId, logObj);
+
+  // Optional: reset collectionError immediately after handling new log
+  const dev = devicesMapRef.current.get(deviceId);
+  if (dev && dev.collectionError === true) {
+    dev.collectionError = false; // ⚡ reset
+    if (DEBUG) console.debug('[MetricsContext] collectionError reset for', deviceId);
+  }
+};
+
+useEffect(() => {
+  const interval = setInterval(() => {
+    devicesMapRef.current.forEach((dev, id) => {
+      if (dev.collectionError === true) {
+        dev.collectionError = false; // ⚡ reset every 5s
+        if (DEBUG) console.debug('[MetricsContext] collectionError auto-reset for', id);
+      }
+    });
+  }, 5000); // reset every 5 seconds
+
+  return () => clearInterval(interval); // cleanup
+}, []); // run once
 
   useEffect(() => {
     // MQTT connect and subscriptions (improved id extraction/validation)
@@ -599,6 +614,7 @@ export const MetricsProvider = ({ children }) => {
     </MetricsContext.Provider>
   );
 };
+
 
 
 
