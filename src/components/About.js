@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './About.css';
 
 const About = () => {
+
   const [selectedImage, setSelectedImage] = useState(null);
 
   const developers = [
@@ -21,43 +22,85 @@ const About = () => {
     { img: "Ecotrack1.jpg", label: "Final Assembly" }
   ];
 
+  const nextImage = () => {
+    const nextIndex = (selectedImage.index + 1) % prototypeImages.length;
+
+    setSelectedImage({
+      img: prototypeImages[nextIndex].img,
+      index: nextIndex
+    });
+  };
+
+  const prevImage = () => {
+    const prevIndex =
+      (selectedImage.index - 1 + prototypeImages.length) %
+      prototypeImages.length;
+
+    setSelectedImage({
+      img: prototypeImages[prevIndex].img,
+      index: prevIndex
+    });
+  };
+
+  useEffect(() => {
+
+    const handleKeyDown = (e) => {
+
+      if (!selectedImage) return;
+
+      if (e.key === "ArrowRight") nextImage();
+
+      if (e.key === "ArrowLeft") prevImage();
+
+      if (e.key === "Escape") setSelectedImage(null);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+
+  }, [selectedImage]);
+
   return (
     <div style={styles.pageWrapper}>
       <div style={styles.container}>
 
-        {/* Logo */}
         <div style={styles.topImageContainer}>
           <img src="EcotrackLogo.png" alt="Debris Detection System" style={styles.topImage}/>
         </div>
 
-        {/* About Section */}
         <div style={styles.header}>About the Debris Detection System</div>
 
         <div style={styles.descGrid}>
           <div style={styles.descCard}>
             <p><strong>Debris Removal:</strong> Detects and removes debris from drainage inlets, improving sewer maintenance and preventing urban flooding.</p>
           </div>
+
           <div style={styles.descCard}>
             <p><strong>Monitoring & Alerts:</strong> Monitors grate-type drainage inlets, sends alerts when bins are full, detects flooding, and tracks system location.</p>
           </div>
+
           <div style={styles.descCard}>
             <p><strong>Design Goals:</strong> Efficient, cost-effective solution adhering to engineering standards and considering safety, environment, and economics.</p>
           </div>
+
           <div style={styles.descCard}>
             <p><strong>Testing & Reliability:</strong> Continuously evaluated for accuracy and performance in real-world conditions.</p>
           </div>
         </div>
 
-        {/* Developers */}
         <div style={styles.sectionHeader}>Meet the Developers</div>
 
         <div style={styles.devGrid}>
           {developers.map((dev, index) => (
             <div key={index} className="flip-card">
+
               <div className="flipInner">
 
                 <div className="flipFront">
-                  <img src={dev.img} alt={dev.name} />
+                  <img src={dev.img} alt={dev.name}/>
                   <h3 style={styles.devName}>{dev.name}</h3>
                   <p style={styles.devCourse}>{dev.course}</p>
                 </div>
@@ -70,40 +113,57 @@ const About = () => {
                 </div>
 
               </div>
+
             </div>
           ))}
         </div>
 
-        {/* Prototype Section */}
         <div style={styles.sectionHeader}>Prototype Gallery</div>
 
         <div style={styles.albumContainer}>
           {prototypeImages.map((item, index) => (
+
             <div
               key={index}
               style={styles.albumItem}
-              onClick={() => setSelectedImage({ img: item.img, index })}
+              onClick={() =>
+                setSelectedImage({
+                  img: item.img,
+                  index: index
+                })
+              }
             >
               <img src={item.img} alt="prototype" style={styles.albumImg}/>
               <p style={styles.caption}>{item.label}</p>
             </div>
+
           ))}
         </div>
 
-        {/* Lightbox */}
         {selectedImage && (
+
           <div style={styles.overlay} onClick={() => setSelectedImage(null)}>
-            <div style={styles.lightbox} onClick={e => e.stopPropagation()}>
+
+            <div style={styles.lightbox} onClick={(e) => e.stopPropagation()}>
+
               <img src={selectedImage.img} alt="Prototype" style={styles.lightboxImg}/>
+
               <button style={styles.closeBtn} onClick={() => setSelectedImage(null)}>×</button>
+
+              <button style={styles.prevBtn} onClick={prevImage}>❮</button>
+
+              <button style={styles.nextBtn} onClick={nextImage}>❯</button>
+
               <p style={styles.lightboxCaption}>
                 {prototypeImages[selectedImage.index].label}
               </p>
+
             </div>
+
           </div>
+
         )}
 
-        {/* Footer */}
         <div style={styles.footer}>
           © 2026 EcoTrack Debris Detection System | BS Computer Engineering
         </div>
@@ -226,6 +286,7 @@ const styles = {
   },
 
   lightbox: {
+    position: 'relative',
     backgroundColor: '#fff',
     padding: '20px',
     borderRadius: '12px',
@@ -246,6 +307,34 @@ const styles = {
     border: 'none',
     fontSize: '2rem',
     cursor: 'pointer'
+  },
+
+  prevBtn: {
+    position: 'absolute',
+    left: '10px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    background: 'rgba(0,0,0,0.5)',
+    color: '#fff',
+    border: 'none',
+    fontSize: '2rem',
+    padding: '10px',
+    cursor: 'pointer',
+    borderRadius: '8px'
+  },
+
+  nextBtn: {
+    position: 'absolute',
+    right: '10px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    background: 'rgba(0,0,0,0.5)',
+    color: '#fff',
+    border: 'none',
+    fontSize: '2rem',
+    padding: '10px',
+    cursor: 'pointer',
+    borderRadius: '8px'
   },
 
   lightboxCaption: {
