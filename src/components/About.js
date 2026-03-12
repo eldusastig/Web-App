@@ -22,7 +22,6 @@ const About = () => {
   ];
 
   return (
-    <div style={styles.pageBackground}>
       <div style={styles.container}>
 
         {/* Logo */}
@@ -104,11 +103,6 @@ const About = () => {
 };
 
 const styles = {
-  pageBackground: {
-    background: 'linear-gradient(to right, #e0f2fe, #f0f9ff)',
-    minHeight: '100vh',
-    padding: '40px 0',
-  },
   container: {
     backgroundColor: '#fff',
     width: '90%',
