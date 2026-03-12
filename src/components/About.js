@@ -114,17 +114,17 @@ const About = () => {
 
 const styles = {
   pageWrapper: {
-    minHeight: '100vh',  // full screen
-    backgroundColor: '#fff', // page is completely white
+    minHeight: '100vh',  
+    backgroundColor: '#fff', 
     display: 'flex',
     justifyContent: 'center',
-    alignItems: 'flex-start', // top aligned
+    alignItems: 'flex-start', 
     padding: '20px'
   },
   container: {
     width: '90%',
     maxWidth: '1200px',
-    backgroundColor: '#fff', // container white
+    backgroundColor: '#fff', 
     padding: '40px',
     borderRadius: '15px',
     boxShadow: '0 8px 20px rgba(0,0,0,0.1)',
@@ -134,13 +134,13 @@ const styles = {
   },
   topImageContainer: { display: 'flex', justifyContent: 'center', marginBottom: '25px' },
   topImage: { width: '150px' },
-  header: { fontSize: '2.4rem', fontWeight: '700', marginBottom: '30px' },
+  header: { fontSize: '2.4rem', fontWeight: '700', marginBottom: '30px', color:'#0F1B34'},
   descGrid: { display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '20px', marginBottom: '50px' },
-  descCard: { backgroundColor: '#f1f5f9', padding: '20px', borderRadius: '12px' },
+  descCard: { backgroundColor: '#0F1B34', padding: '20px', borderRadius: '12px' },
   sectionHeader: { fontSize: '2rem', marginBottom: '30px', fontWeight: '700' },
   devGrid: { display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '25px', marginBottom: '50px' },
   devImg: { width: '120px', height: '120px', borderRadius: '50%', objectFit: 'cover', marginBottom: '12px' },
-  devName: { fontSize: '1rem', fontWeight: '600', color: '#1E293B' },
+  devName: { fontSize: '1rem', fontWeight: '600', color: '#0F1B34' },
   devCourse: { fontSize: '0.85rem', color: '#475569' },
   albumContainer: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '20px' },
   albumItem: { cursor: 'pointer' },
