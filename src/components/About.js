@@ -25,7 +25,7 @@ const About = () => {
 
       {/* Logo */}
       <div style={styles.topImageContainer}>
-        <img src="EcotrackLogo.png" alt="Debris Detection System" style={styles.topImage} />
+        <img src="EcotrackLogo.png" alt="Debris Detection System" style={styles.topImage}/>
       </div>
 
       {/* About Section */}
@@ -47,7 +47,7 @@ const About = () => {
         We are testing and evaluating the system’s accuracy to ensure reliability and performance in real-world conditions.
       </p>
 
-      {/* Developers Section */}
+      {/* Developers */}
       <div style={styles.sectionHeader}>Meet the Developers</div>
 
       <div style={styles.devGrid}>
@@ -69,7 +69,7 @@ const About = () => {
         ))}
       </div>
 
-      {/* Prototype Album */}
+      {/* Prototype Section */}
       <div style={styles.sectionHeader}>Prototype</div>
 
       <div style={styles.albumContainer}>
@@ -88,11 +88,11 @@ const About = () => {
         ))}
       </div>
 
-      {/* Lightbox */}
+      {/* Image Lightbox */}
       {selectedImage && (
         <div style={styles.overlay} onClick={() => setSelectedImage(null)}>
           <div style={styles.lightbox}>
-            <img src={selectedImage} alt="Prototype" style={styles.lightboxImg} />
+            <img src={selectedImage} alt="Prototype" style={styles.lightboxImg}/>
             <button style={styles.closeBtn} onClick={() => setSelectedImage(null)}>×</button>
           </div>
         </div>
@@ -107,7 +107,7 @@ const About = () => {
 
           .dev-card:hover {
             transform: translateY(-6px);
-            box-shadow: 0 8px 18px rgba(0,0,0,0.15);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.15);
           }
 
           .dev-img {
@@ -133,7 +133,7 @@ const styles = {
     margin: '20px auto',
     padding: '50px',
     borderRadius: '12px',
-    boxShadow: '0 6px 15px rgba(0, 0, 0, 0.1)',
+    boxShadow: '0 6px 15px rgba(0,0,0,0.1)',
     textAlign: 'center',
     fontFamily: 'Arial, sans-serif',
   },
@@ -146,7 +146,7 @@ const styles = {
 
   topImage: {
     width: '100%',
-    maxWidth: '300px',
+    maxWidth: '280px',
     height: 'auto',
   },
 
@@ -158,8 +158,8 @@ const styles = {
   },
 
   description: {
-    fontSize: '1.15rem',
-    lineHeight: '1.9',
+    fontSize: '1.1rem',
+    lineHeight: '1.8',
     color: '#555',
     marginBottom: '18px',
     textAlign: 'justify',
@@ -184,49 +184,48 @@ const styles = {
   devGrid: {
     display: 'flex',
     justifyContent: 'center',
+    gap: '20px',
     flexWrap: 'wrap',
-    gap: '25px',
     marginBottom: '40px',
   },
 
-  /* Light developer card */
   devCard: {
-    backgroundColor: '#f1f5f9',
+    backgroundColor: '#f8fafc',
     color: '#1e293b',
-    padding: '25px',
+    padding: '18px',
     borderRadius: '12px',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+    boxShadow: '0 4px 10px rgba(0,0,0,0.08)',
     textAlign: 'center',
-    width: '100%',
-    maxWidth: '220px',
+    width: '170px',
   },
 
   devImg: {
-    width: '100%',
-    height: '200px',
+    width: '120px',
+    height: '120px',
     objectFit: 'cover',
-    borderRadius: '10px',
-    marginBottom: '15px',
+    borderRadius: '50%',
+    marginBottom: '12px',
   },
 
   devName: {
-    fontSize: '1.2rem',
+    fontSize: '1rem',
     fontWeight: '600',
-    marginBottom: '6px',
+    marginBottom: '4px',
   },
 
   devCourse: {
-    fontSize: '0.95rem',
-    fontWeight: '500',
-    marginBottom: '8px',
+    fontSize: '0.85rem',
+    marginBottom: '6px',
+    color: '#475569',
   },
 
   devDesc: {
-    fontSize: '0.9rem',
-    lineHeight: '1.5',
+    fontSize: '0.8rem',
+    lineHeight: '1.4',
+    color: '#64748b',
   },
 
-  /* Prototype Album */
+  /* Prototype album */
   albumContainer: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
