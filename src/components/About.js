@@ -22,7 +22,6 @@ const About = () => {
   ];
 
   return (
-    <div style={styles.pageWrapper}>
       <div style={styles.container}>
 
         {/* Logo */}
@@ -114,12 +113,6 @@ const About = () => {
 };
 
 const styles = {
-
-  pageWrapper: {
-    backgroundColor: '#f8fafc',
-    minHeight: '100vh',
-    padding: '40px 0',
-  },
 
   container: {
     backgroundColor: '#fff',
