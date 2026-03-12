@@ -24,6 +24,8 @@ const About = () => {
 
   return (
 
+    <div style={styles.pageWrapper}>
+
       <div style={styles.container}>
 
         {/* Logo */}
@@ -51,6 +53,8 @@ const About = () => {
           <div style={styles.descCard}>
             <p><strong>Testing & Reliability:</strong> Continuously evaluated for accuracy and performance.</p>
           </div>
+
+        </div>
 
         {/* Developers */}
         <div style={styles.sectionHeader}>Meet the Developers</div>
@@ -154,6 +158,13 @@ const About = () => {
 };
 
 const styles = {
+
+  pageWrapper:{
+    backgroundColor:'#f8fafc',
+    minHeight:'100vh',
+    padding:'40px 0'
+  },
+
   container:{
     backgroundColor:'#fff',
     width:'90%',
