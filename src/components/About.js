@@ -59,7 +59,6 @@ const About = () => {
               </div>
               <div className="flipBack">
                 <h3>{dev.name}</h3>
-                <p>Role: {dev.role}</p>
                 <p className="email">{dev.email}</p>
                 <p>{dev.desc}</p>
               </div>
