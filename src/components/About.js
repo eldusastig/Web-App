@@ -70,7 +70,7 @@ const About = () => {
 
       {/* Prototype Gallery */}
       <div style={styles.sectionHeader}>Prototype Gallery</div>
-      <div style={styles.albumContainer}>
+      <div className="albumContainer">
         {prototypeImages.map((item, index) => (
           <div
             key={index}
@@ -118,15 +118,14 @@ const styles = {
   },
   topImageContainer: { display: 'flex', justifyContent: 'center', marginBottom: '25px' },
   topImage: { width: '150px' },
-  header: { fontSize: '2.4rem', fontWeight: '700', marginBottom: '30px', color:'#0F1B34' },
+  header: { fontSize: '2.4rem', fontWeight: '700', marginBottom: '30px', color:'#000000' },
   descGrid: { display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '20px', marginBottom: '50px' },
   descCard: { backgroundColor: '#0F1B34', padding: '20px', borderRadius: '12px' },
-  sectionHeader: { fontSize: '2rem', marginBottom: '30px', fontWeight: '700', color:'#1E293B' },
+  sectionHeader: { fontSize: '2rem', marginBottom: '30px', fontWeight: '700', color:'#000000' },
   devGrid: { display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '25px', marginBottom: '50px' },
   devImg: { width: '120px', height: '120px', borderRadius: '50%', objectFit: 'cover', marginBottom: '12px' },
   devName: { fontSize: '1rem', fontWeight: '600', color: '#fff' },
   devCourse: { fontSize: '0.85rem', color: '#fff' },
-  albumContainer: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' },
   overlay: { position: 'fixed', top:0, left:0, right:0, bottom:0, backgroundColor:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center' },
   lightbox: { background:'#fff', padding:'20px', borderRadius:'12px', maxWidth:'700px', width:'90%', position:'relative' },
   lightboxImg: { width:'100%', maxHeight:'70vh', objectFit:'contain' },
