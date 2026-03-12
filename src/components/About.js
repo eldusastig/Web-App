@@ -6,10 +6,10 @@ const About = () => {
 
   const developers = [
     { name: "Dhafny Buenafe", course: "BS Computer Engineering", desc: "Specializes in Intelligent Systems.", img: "Buenafe.png", role: "Team Lead", email: "dhafnybuenafe01@email.com" },
-    { name: "Patrick Jordan Cabanatan", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Cabanatan.png", role: "Backend Dev", email: "cabanatan.patrick@gmail.com" },
-    { name: "Jethro Duque", course: "BS Computer Engineering", desc: "Specializes in Railway Engineering.", img: "Duque.jpg", role: "Frontend Dev", email: "jethroduque@email.com" },
-    { name: "Rens Españo", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Espano.png", role: "QA Tester", email: "Rens7363surespsurpano@gmail.com" },
-    { name: "Justin Jello Repani", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Repani.png", role: "UI Designer", email: "acadjelrep@gmail.com" }
+    { name: "Patrick Jordan Cabanatan", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Cabanatan.png", role: "Backend Dev", email: "patrick@email.com" },
+    { name: "Jethro Duque", course: "BS Computer Engineering", desc: "Specializes in Railway Engineering.", img: "Duque.jpg", role: "Frontend Dev", email: "jethro@email.com" },
+    { name: "Rens Españo", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Espano.png", role: "QA Tester", email: "rens@email.com" },
+    { name: "Justin Jello Repani", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Repani.png", role: "UI Designer", email: "justin@email.com" }
   ];
 
   const prototypeImages = [
@@ -47,7 +47,7 @@ const About = () => {
       </div>
 
       {/* Developers */}
-      <div style={styles.sectionHeader}>Meet the Developers</div>
+      <div className="sectionHeader">Meet the Developers</div>
       <div style={styles.devGrid}>
         {developers.map((dev, index) => (
           <div key={index} className="flip-card">
@@ -59,8 +59,8 @@ const About = () => {
               </div>
               <div className="flipBack">
                 <h3>{dev.name}</h3>
-                <p>Role: {dev.role}</p>
-                <p>Email: {dev.email}</p>
+                <p style={{wordBreak: "break-all"}}>Role: {dev.role}</p>
+                <p style={{wordBreak: "break-all"}}>Email: {dev.email}</p>
                 <p>{dev.desc}</p>
               </div>
             </div>
@@ -69,7 +69,7 @@ const About = () => {
       </div>
 
       {/* Prototype Gallery */}
-      <div style={styles.sectionHeader}>Prototype Gallery</div>
+      <div className="sectionHeader">Prototype Gallery</div>
       <div className="albumContainer">
         {prototypeImages.map((item, index) => (
           <div
@@ -118,10 +118,9 @@ const styles = {
   },
   topImageContainer: { display: 'flex', justifyContent: 'center', marginBottom: '25px' },
   topImage: { width: '150px' },
-  header: { fontSize: '2.4rem', fontWeight: '700', marginBottom: '30px', color:'#000000' },
+  header: { fontSize: '2.4rem', fontWeight: '700', marginBottom: '30px', color:'#000' }, 
   descGrid: { display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '20px', marginBottom: '50px' },
   descCard: { backgroundColor: '#0F1B34', padding: '20px', borderRadius: '12px' },
-  sectionHeader: { fontSize: '2rem', marginBottom: '30px', fontWeight: '700', color:'#000000' },
   devGrid: { display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '25px', marginBottom: '50px' },
   devImg: { width: '120px', height: '120px', borderRadius: '50%', objectFit: 'cover', marginBottom: '12px' },
   devName: { fontSize: '1rem', fontWeight: '600', color: '#fff' },
