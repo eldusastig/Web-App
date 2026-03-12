@@ -48,23 +48,27 @@ const About = () => {
           </div>
         </div>
 
-        {/* Developers Section */}
+        {/* Developers */}
         <div style={styles.sectionHeader}>Meet the Developers</div>
+
         <div style={styles.devGrid}>
           {developers.map((dev, index) => (
             <div key={index} className="flip-card">
               <div className="flipInner">
+
                 <div className="flipFront">
-                  <img src={dev.img} alt={dev.name} style={styles.devImg} />
+                  <img src={dev.img} alt={dev.name} />
                   <h3 style={styles.devName}>{dev.name}</h3>
                   <p style={styles.devCourse}>{dev.course}</p>
                 </div>
+
                 <div className="flipBack">
                   <h3>{dev.name}</h3>
-                  <p>Role: {dev.role}</p>
-                  <p>Email: {dev.email}</p>
+                  <p><strong>Role:</strong> {dev.role}</p>
+                  <p><strong>Email:</strong> {dev.email}</p>
                   <p>{dev.desc}</p>
                 </div>
+
               </div>
             </div>
           ))}
@@ -72,10 +76,15 @@ const About = () => {
 
         {/* Prototype Section */}
         <div style={styles.sectionHeader}>Prototype Gallery</div>
+
         <div style={styles.albumContainer}>
           {prototypeImages.map((item, index) => (
-            <div key={index} style={styles.albumItem} onClick={() => setSelectedImage({ img: item.img, index })}>
-              <img src={item.img} alt={`Prototype ${index + 1}`} style={styles.albumImg}/>
+            <div
+              key={index}
+              style={styles.albumItem}
+              onClick={() => setSelectedImage({ img: item.img, index })}
+            >
+              <img src={item.img} alt="prototype" style={styles.albumImg}/>
               <p style={styles.caption}>{item.label}</p>
             </div>
           ))}
@@ -87,7 +96,9 @@ const About = () => {
             <div style={styles.lightbox} onClick={e => e.stopPropagation()}>
               <img src={selectedImage.img} alt="Prototype" style={styles.lightboxImg}/>
               <button style={styles.closeBtn} onClick={() => setSelectedImage(null)}>×</button>
-              <p style={styles.lightboxCaption}>{prototypeImages[selectedImage.index].label}</p>
+              <p style={styles.lightboxCaption}>
+                {prototypeImages[selectedImage.index].label}
+              </p>
             </div>
           </div>
         )}
@@ -96,19 +107,22 @@ const About = () => {
         <div style={styles.footer}>
           © 2026 EcoTrack Debris Detection System | BS Computer Engineering
         </div>
+
       </div>
     </div>
   );
 };
 
 const styles = {
+
   pageWrapper: {
-    backgroundColor: '#f8fafc', // very light gray background for the whole page
+    backgroundColor: '#f8fafc',
     minHeight: '100vh',
     padding: '40px 0',
   },
+
   container: {
-    backgroundColor: '#fff', // white main container
+    backgroundColor: '#fff',
     width: '90%',
     maxWidth: '1200px',
     margin: '0 auto',
@@ -118,26 +132,134 @@ const styles = {
     textAlign: 'center',
     fontFamily: 'Arial, sans-serif',
   },
-  topImageContainer: { display: 'flex', justifyContent: 'center', marginBottom: '25px' },
-  topImage: { width: '150px', height: 'auto' },
-  header: { fontSize: '2.4rem', color: '#0f172a', fontWeight: '700', marginBottom: '30px' },
-  descGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px', marginBottom: '50px' },
-  descCard: { backgroundColor: '#f1f5f9', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', fontSize: '1rem', lineHeight: '1.6', color: '#1e293b' },
-  sectionHeader: { fontSize: '2rem', color: '#0f172a', marginBottom: '30px', fontWeight: '700' },
-  devGrid: { display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '25px', marginBottom: '50px' },
-  devImg: { width: '120px', height: '120px', borderRadius: '50%', objectFit: 'cover', marginBottom: '12px' },
-  devName: { fontSize: '1rem', fontWeight: '600', marginBottom: '4px' },
-  devCourse: { fontSize: '0.85rem', marginBottom: '6px', color: '#475569' },
-  albumContainer: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', justifyItems: 'center', marginBottom: '50px' },
-  albumItem: { borderRadius: '12px', overflow: 'hidden', cursor: 'pointer', transition: '0.3s' },
-  albumImg: { width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px' },
-  caption: { color: '#0f172a', marginTop: '8px', fontSize: '0.85rem', textAlign: 'center' },
-  overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
-  lightbox: { position: 'relative', backgroundColor: '#fff', padding: '20px', borderRadius: '12px', maxWidth: '80%', maxHeight: '80%', textAlign: 'center' },
-  lightboxImg: { width: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '8px' },
-  closeBtn: { position: 'absolute', top: '10px', right: '15px', background: 'transparent', border: 'none', fontSize: '2rem', cursor: 'pointer' },
-  lightboxCaption: { marginTop: '10px', fontSize: '0.9rem', color: '#1e293b' },
-  footer: { fontSize: '0.9rem', color: '#475569', borderTop: '1px solid #ddd', paddingTop: '20px', marginTop: '40px' }
+
+  topImageContainer: {
+    display: 'flex',
+    justifyContent: 'center',
+    marginBottom: '25px'
+  },
+
+  topImage: {
+    width: '150px'
+  },
+
+  header: {
+    fontSize: '2.4rem',
+    color: '#0f172a',
+    fontWeight: '700',
+    marginBottom: '30px'
+  },
+
+  descGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2,1fr)',
+    gap: '20px',
+    marginBottom: '50px'
+  },
+
+  descCard: {
+    backgroundColor: '#f1f5f9',
+    padding: '20px',
+    borderRadius: '12px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+    fontSize: '1rem',
+    lineHeight: '1.6'
+  },
+
+  sectionHeader: {
+    fontSize: '2rem',
+    marginBottom: '30px',
+    fontWeight: '700'
+  },
+
+  devGrid: {
+    display: 'flex',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: '25px',
+    marginBottom: '50px'
+  },
+
+  devName: {
+    fontSize: '1rem',
+    fontWeight: '600'
+  },
+
+  devCourse: {
+    fontSize: '0.85rem',
+    color: '#475569'
+  },
+
+  albumContainer: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3,1fr)',
+    gap: '20px',
+    marginBottom: '50px'
+  },
+
+  albumItem: {
+    cursor: 'pointer'
+  },
+
+  albumImg: {
+    width: '100%',
+    height: '200px',
+    objectFit: 'cover',
+    borderRadius: '8px'
+  },
+
+  caption: {
+    marginTop: '8px',
+    fontSize: '0.85rem'
+  },
+
+  overlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+
+  lightbox: {
+    backgroundColor: '#fff',
+    padding: '20px',
+    borderRadius: '12px',
+    maxWidth: '80%'
+  },
+
+  lightboxImg: {
+    width: '100%',
+    maxHeight: '70vh',
+    objectFit: 'contain'
+  },
+
+  closeBtn: {
+    position: 'absolute',
+    top: '10px',
+    right: '15px',
+    background: 'transparent',
+    border: 'none',
+    fontSize: '2rem',
+    cursor: 'pointer'
+  },
+
+  lightboxCaption: {
+    marginTop: '10px'
+  },
+
+  footer: {
+    fontSize: '0.9rem',
+    color: '#475569',
+    borderTop: '1px solid #ddd',
+    paddingTop: '20px',
+    marginTop: '40px'
+  }
+
 };
 
 export default About;
