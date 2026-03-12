@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import './About.css'; // make sure this CSS file exists
+import './About.css';
 
 const About = () => {
   const [selectedImage, setSelectedImage] = useState(null);
@@ -22,6 +22,7 @@ const About = () => {
   ];
 
   return (
+    <div style={styles.pageWrapper}>
       <div style={styles.container}>
 
         {/* Logo */}
@@ -53,13 +54,11 @@ const About = () => {
           {developers.map((dev, index) => (
             <div key={index} className="flip-card">
               <div className="flipInner">
-                {/* Front Side */}
                 <div className="flipFront">
                   <img src={dev.img} alt={dev.name} style={styles.devImg} />
                   <h3 style={styles.devName}>{dev.name}</h3>
                   <p style={styles.devCourse}>{dev.course}</p>
                 </div>
-                {/* Back Side */}
                 <div className="flipBack">
                   <h3>{dev.name}</h3>
                   <p>Role: {dev.role}</p>
@@ -103,8 +102,13 @@ const About = () => {
 };
 
 const styles = {
+  pageWrapper: {
+    backgroundColor: '#f8fafc', // very light gray background for the whole page
+    minHeight: '100vh',
+    padding: '40px 0',
+  },
   container: {
-    backgroundColor: '#fff',
+    backgroundColor: '#fff', // white main container
     width: '90%',
     maxWidth: '1200px',
     margin: '0 auto',
