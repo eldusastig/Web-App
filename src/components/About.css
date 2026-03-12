@@ -1,7 +1,7 @@
 .flip-card {
   background-color: transparent;
   width: 180px;
-  height: 300px; 
+  height: 300px;
   perspective: 1000px;
 }
 
@@ -30,26 +30,16 @@
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  box-sizing: border-box;
 }
 
 .flipFront {
-  background-color: #f8fafc; 
+  background-color: #f8fafc;
   color: #1e293b;
 }
 
 .flipBack {
-  background-color: #52baff;
-  color: #000000; /* changed text to black */
+  background-color: #e0f2fe;
+  color: #1e293b;
   transform: rotateY(180deg);
   font-size: 0.85rem;
-  line-height: 1.4;
-}
-
-/* Fix long email text */
-.flipBack p {
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  text-align: center;
-  margin: 4px 0;
 }
