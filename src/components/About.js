@@ -138,7 +138,7 @@ const styles = {
   lightbox: { background:'#fff', padding:'20px', borderRadius:'12px', maxWidth:'700px', width:'90%', position:'relative' },
   lightboxImg: { width:'100%', maxHeight:'70vh', objectFit:'contain' },
   closeBtn: { position:'absolute', top:'10px', right:'15px', fontSize:'2rem', border:'none', background:'transparent', cursor:'pointer' },
-  lightboxCaption: { marginTop:'10px' },
+  lightboxCaption: { marginTop:'10px',  color: '#1E293B' },
   footer: { marginTop:'40px', borderTop:'1px solid #ddd', paddingTop:'20px' }
 };
 
