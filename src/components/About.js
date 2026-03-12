@@ -22,6 +22,7 @@ const About = () => {
 
   return (
     <div style={styles.container}>
+
       {/* Logo */}
       <div style={styles.topImageContainer}>
         <img src="EcotrackLogo.png" alt="Debris Detection System" style={styles.topImage} />
@@ -29,57 +30,69 @@ const About = () => {
 
       {/* About Section */}
       <div style={styles.header}>About the Debris Detection System</div>
+
       <p style={styles.description}>
         This system is designed to detect and remove debris from drainage inlets, aiming to improve sewer maintenance and prevent urban flooding.
       </p>
+
       <p style={styles.description}>
         The prototype monitors grate-type drainage inlets, sends alerts when the collecting bin is full, detects signs of flooding, and identifies the system’s location for easy tracking.
       </p>
+
       <p style={styles.description}>
         Our goal is to create a functional, efficient, and cost-effective solution that adheres to engineering standards and considers economic, environmental, safety, and cultural factors in all design decisions.
       </p>
+
       <p style={styles.lastDescription}>
         We are testing and evaluating the system’s accuracy to ensure reliability and performance in real-world conditions.
       </p>
 
       {/* Developers Section */}
       <div style={styles.sectionHeader}>Meet the Developers</div>
+
       <div style={styles.devGrid}>
-        {developers.slice(0, 4).map((dev, index) => (
+        {developers.map((dev, index) => (
           <div key={index} style={styles.devCard} className="dev-card">
-            <img src={dev.img} alt={dev.name} style={styles.devImg} className="dev-img" />
+
+            <img
+              src={dev.img}
+              alt={dev.name}
+              style={styles.devImg}
+              className="dev-img"
+            />
+
             <h3 style={styles.devName}>{dev.name}</h3>
             <p style={styles.devCourse}>{dev.course}</p>
             <p style={styles.devDesc}>{dev.desc}</p>
+
           </div>
         ))}
-      </div>
-
-      {/* Fifth Developer */}
-      <div style={styles.devCenter}>
-        <div style={styles.devCard} className="dev-card">
-          <img src={developers[4].img} alt={developers[4].name} style={styles.devImg} className="dev-img" />
-          <h3 style={styles.devName}>{developers[4].name}</h3>
-          <p style={styles.devCourse}>{developers[4].course}</p>
-          <p style={styles.devDesc}>{developers[4].desc}</p>
-        </div>
       </div>
 
       {/* Prototype Album */}
       <div style={styles.sectionHeader}>Prototype</div>
+
       <div style={styles.albumContainer}>
         {prototypeImages.map((img, index) => (
-          <div key={index} style={styles.albumItem} onClick={() => setSelectedImage(img)}>
-            <img src={img} alt={`3D Prototype ${index + 1}`} style={styles.albumImg} />
+          <div
+            key={index}
+            style={styles.albumItem}
+            onClick={() => setSelectedImage(img)}
+          >
+            <img
+              src={img}
+              alt={`Prototype ${index + 1}`}
+              style={styles.albumImg}
+            />
           </div>
         ))}
       </div>
 
-      {/* Popup Lightbox */}
+      {/* Lightbox */}
       {selectedImage && (
         <div style={styles.overlay} onClick={() => setSelectedImage(null)}>
           <div style={styles.lightbox}>
-            <img src={selectedImage} alt="Enlarged 3D" style={styles.lightboxImg} />
+            <img src={selectedImage} alt="Prototype" style={styles.lightboxImg} />
             <button style={styles.closeBtn} onClick={() => setSelectedImage(null)}>×</button>
           </div>
         </div>
@@ -91,23 +104,28 @@ const About = () => {
           .dev-card {
             transition: transform 0.3s ease, box-shadow 0.3s ease;
           }
+
           .dev-card:hover {
-            transform: translateY(-8px);
-            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+            transform: translateY(-6px);
+            box-shadow: 0 8px 18px rgba(0,0,0,0.15);
           }
+
           .dev-img {
             transition: transform 0.3s ease;
           }
+
           .dev-card:hover .dev-img {
             transform: scale(1.05);
           }
         `}
       </style>
+
     </div>
   );
 };
 
 const styles = {
+
   container: {
     backgroundColor: '#ffffff',
     width: '85%',
@@ -119,22 +137,26 @@ const styles = {
     textAlign: 'center',
     fontFamily: 'Arial, sans-serif',
   },
+
   topImageContainer: {
     display: 'flex',
     justifyContent: 'center',
     marginBottom: '20px',
   },
+
   topImage: {
     width: '100%',
     maxWidth: '300px',
     height: 'auto',
   },
+
   header: {
     fontSize: '2.4rem',
     color: '#2c3e50',
     marginBottom: '25px',
     fontWeight: '700',
   },
+
   description: {
     fontSize: '1.15rem',
     lineHeight: '1.9',
@@ -142,9 +164,11 @@ const styles = {
     marginBottom: '18px',
     textAlign: 'justify',
   },
+
   lastDescription: {
     marginBottom: '50px',
   },
+
   sectionHeader: {
     fontSize: '2rem',
     color: '#2c3e50',
@@ -155,49 +179,54 @@ const styles = {
     display: 'inline-block',
     paddingBottom: '5px',
   },
+
+  /* Developers layout */
   devGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '30px',
-    justifyItems: 'center',
-    marginBottom: '30px',
-  },
-  devCenter: {
     display: 'flex',
     justifyContent: 'center',
-    marginBottom: '50px',
+    flexWrap: 'wrap',
+    gap: '25px',
+    marginBottom: '40px',
   },
+
+  /* Light developer card */
   devCard: {
-    backgroundColor: '#0F172A',
-    color: '#ffffff',
+    backgroundColor: '#f1f5f9',
+    color: '#1e293b',
     padding: '25px',
     borderRadius: '12px',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
     textAlign: 'center',
     width: '100%',
-    maxWidth: '280px',
+    maxWidth: '220px',
   },
+
   devImg: {
     width: '100%',
-    height: '220px',
+    height: '200px',
     objectFit: 'cover',
     borderRadius: '10px',
     marginBottom: '15px',
   },
+
   devName: {
-    fontSize: '1.3rem',
+    fontSize: '1.2rem',
     fontWeight: '600',
     marginBottom: '6px',
   },
+
   devCourse: {
-    fontSize: '1rem',
-    fontWeight: '500',
-    marginBottom: '10px',
-  },
-  devDesc: {
     fontSize: '0.95rem',
+    fontWeight: '500',
+    marginBottom: '8px',
+  },
+
+  devDesc: {
+    fontSize: '0.9rem',
     lineHeight: '1.5',
   },
+
+  /* Prototype Album */
   albumContainer: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
@@ -205,32 +234,36 @@ const styles = {
     justifyItems: 'center',
     marginTop: '20px',
   },
+
   albumItem: {
     backgroundColor: '#0F172A',
     padding: '10px',
     borderRadius: '10px',
     boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
-    transition: 'transform 0.3s ease',
     cursor: 'pointer',
   },
+
   albumImg: {
     width: '100%',
     height: '200px',
     objectFit: 'cover',
     borderRadius: '5px',
   },
+
+  /* Lightbox */
   overlay: {
     position: 'fixed',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0,0,0,0.7)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1000,
   },
+
   lightbox: {
     position: 'relative',
     backgroundColor: '#fff',
@@ -240,13 +273,13 @@ const styles = {
     maxWidth: '80%',
     maxHeight: '80%',
   },
+
   lightboxImg: {
-    width: '90%',
-    height: '90%',
+    width: '100%',
     maxHeight: '70vh',
     objectFit: 'contain',
-    borderRadius: '5px',
   },
+
   closeBtn: {
     position: 'absolute',
     top: '10px',
@@ -257,6 +290,7 @@ const styles = {
     color: '#333',
     cursor: 'pointer',
   },
+
 };
 
 export default About;
