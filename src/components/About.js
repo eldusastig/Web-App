@@ -17,237 +17,135 @@ const About = () => {
     { img: "Ecotrack6.jpg", label: "3D Prototype Top View" },
     { img: "Ecotrack5.jpg", label: "3D Prototype Back View" },
     { img: "Ecotrack2.jpg", label: "Overall 3D Prototype" },
-    { img: "Ecotrack1.jpg", label: "Final Assembly" },
-  ];
-
-  const descriptions = [
-    "This system is designed to detect and remove debris from drainage inlets, aiming to improve sewer maintenance and prevent urban flooding.",
-    "The prototype monitors grate-type drainage inlets, sends alerts when the collecting bin is full, detects signs of flooding, and identifies the system’s location for easy tracking.",
-    "Our goal is to create a functional, efficient, and cost-effective solution that adheres to engineering standards and considers economic, environmental, safety, and cultural factors in all design decisions.",
-    "We are testing and evaluating the system’s accuracy to ensure reliability and performance in real-world conditions.",
+    { img: "Ecotrack1.jpg", label: "Final Assembly" }
   ];
 
   return (
-    <div style={styles.container}>
-      {/* Logo */}
-      <div style={styles.topImageContainer}>
-        <img src="EcotrackLogo.png" alt="Debris Detection System" style={styles.topImage}/>
-      </div>
+    <div style={styles.pageBackground}>
+      <div style={styles.container}>
 
-      {/* About Section */}
-      <div style={styles.header}>About the Debris Detection System</div>
+        {/* Logo */}
+        <div style={styles.topImageContainer}>
+          <img src="EcotrackLogo.png" alt="Debris Detection System" style={styles.topImage}/>
+        </div>
 
-      {/* 2 by 2 Description */}
-      <div style={styles.descriptionGrid}>
-        {descriptions.map((desc, index) => (
-          <p key={index} style={styles.description}>{desc}</p>
-        ))}
-      </div>
+        {/* About Section */}
+        <div style={styles.header}>About the Debris Detection System</div>
 
-      {/* Developers */}
-      <div style={styles.sectionHeader}>Meet the Developers</div>
-      <div style={styles.devGrid}>
-        {developers.map((dev, index) => (
-          <div key={index} style={styles.devCard} className="dev-card">
-            <img src={dev.img} alt={dev.name} style={styles.devImg} className="dev-img"/>
-            <h3 style={styles.devName}>{dev.name}</h3>
-            <p style={styles.devCourse}>{dev.course}</p>
-            <p style={styles.devDesc}>{dev.desc}</p>
+        <div style={styles.descGrid}>
+          <div style={styles.descCard}>
+            <p>
+              <strong>Debris Removal:</strong> Detects and removes debris from drainage inlets, improving sewer maintenance and preventing urban flooding.
+            </p>
           </div>
-        ))}
-      </div>
 
-      {/* Prototype Section */}
-      <div style={styles.sectionHeader}>Prototype</div>
-      <div style={styles.albumContainer}>
-        {prototypeImages.map((item, index) => (
-          <div key={index} style={styles.albumItem} onClick={() => setSelectedImage(item.img)}>
-            <img src={item.img} alt={`Prototype ${index + 1}`} style={styles.albumImg}/>
-            <p style={styles.caption}>{item.label}</p>
+          <div style={styles.descCard}>
+            <p>
+              <strong>Monitoring & Alerts:</strong> Monitors grate-type drainage inlets, sends alerts when bins are full, detects flooding, and tracks system location.
+            </p>
           </div>
-        ))}
-      </div>
 
-      {/* Image Lightbox */}
-      {selectedImage && (
-        <div style={styles.overlay} onClick={() => setSelectedImage(null)}>
-          <div style={styles.lightbox}>
-            <img src={selectedImage} alt="Prototype" style={styles.lightboxImg}/>
-            <button style={styles.closeBtn} onClick={() => setSelectedImage(null)}>×</button>
+          <div style={styles.descCard}>
+            <p>
+              <strong>Design Goals:</strong> Efficient, cost-effective solution adhering to engineering standards and considering safety, environment, and economics.
+            </p>
+          </div>
+
+          <div style={styles.descCard}>
+            <p>
+              <strong>Testing & Reliability:</strong> Continuously evaluated for accuracy and performance in real-world conditions.
+            </p>
           </div>
         </div>
-      )}
 
-      {/* Footer */}
-      <div style={styles.footer}>
-        © 2026 EcoTrack Debris Detection System | BS Computer Engineering
+        {/* Developers Section */}
+        <div style={styles.sectionHeader}>Meet the Developers</div>
+        <div style={styles.devGrid}>
+          {developers.map((dev, index) => (
+            <div key={index} style={styles.devCard}>
+              <img src={dev.img} alt={dev.name} style={styles.devImg} />
+              <h3 style={styles.devName}>{dev.name}</h3>
+              <p style={styles.devCourse}>{dev.course}</p>
+              <p style={styles.devDesc}>{dev.desc}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Prototype Section */}
+        <div style={styles.sectionHeader}>Prototype</div>
+        <div style={styles.albumContainer}>
+          {prototypeImages.map((item, index) => (
+            <div
+              key={index}
+              style={styles.albumItem}
+              onClick={() => setSelectedImage({ img: item.img, index })}
+            >
+              <img src={item.img} alt={`Prototype ${index + 1}`} style={styles.albumImg}/>
+              <p style={styles.caption}>{item.label}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Lightbox */}
+        {selectedImage && (
+          <div style={styles.overlay} onClick={() => setSelectedImage(null)}>
+            <div style={styles.lightbox} onClick={e => e.stopPropagation()}>
+              <img src={selectedImage.img} alt="Prototype" style={styles.lightboxImg}/>
+              <button style={styles.closeBtn} onClick={() => setSelectedImage(null)}>×</button>
+              <p style={styles.lightboxCaption}>{prototypeImages[selectedImage.index].label}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div style={styles.footer}>
+          © 2026 EcoTrack Debris Detection System | BS Computer Engineering
+        </div>
+
       </div>
-
-      {/* Hover Effects */}
-      <style>
-        {`
-          .dev-card {
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-          }
-          .dev-card:hover {
-            transform: translateY(-6px);
-            box-shadow: 0 12px 25px rgba(34,197,94,0.25);
-          }
-          .dev-img {
-            transition: transform 0.3s ease;
-          }
-          .dev-card:hover .dev-img {
-            transform: scale(1.05);
-          }
-        `}
-      </style>
     </div>
   );
 };
 
 const styles = {
+  pageBackground: {
+    background: 'linear-gradient(to right, #e0f2fe, #f0f9ff)',
+    minHeight: '100vh',
+    padding: '40px 0',
+  },
   container: {
     backgroundColor: '#ffffff',
-    width: '85%',
+    width: '90%',
     maxWidth: '1200px',
-    margin: '20px auto',
-    padding: '50px',
-    borderRadius: '12px',
-    boxShadow: '0 6px 15px rgba(0,0,0,0.1)',
+    margin: '0 auto',
+    padding: '40px',
+    borderRadius: '15px',
+    boxShadow: '0 8px 20px rgba(0,0,0,0.1)',
+    textAlign: 'center',
     fontFamily: 'Arial, sans-serif',
   },
-
-  topImageContainer: {
-    display: 'flex',
-    justifyContent: 'center',
-    marginBottom: '20px',
-  },
-
-  topImage: {
-    width: '100%',
-    maxWidth: '280px',
-    height: 'auto',
-    filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.2))'
-  },
-
-  header: {
-    fontSize: '2.4rem',
-    color: '#2c3e50',
-    marginBottom: '25px',
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-
-  descriptionGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '25px',
-    marginBottom: '40px',
-  },
-
-  description: {
-    fontSize: '1.1rem',
-    lineHeight: '1.8',
-    color: '#555',
-    textAlign: 'justify',
-  },
-
-  sectionHeader: {
-    fontSize: '2rem',
-    color: '#2c3e50',
-    marginTop: '50px',
-    marginBottom: '30px',
-    fontWeight: '700',
-    textAlign: 'center',
-    borderBottom: '2px solid #22c55e',
-    display: 'inline-block',
-    paddingBottom: '5px',
-  },
-
-  devGrid: {
-    display: 'flex',
-    justifyContent: 'center',
-    gap: '20px',
-    flexWrap: 'wrap',
-    marginBottom: '40px',
-  },
-
-  devCard: {
-    backgroundColor: '#f1f5f9',
-    color: '#1e293b',
-    padding: '18px',
-    borderRadius: '12px',
-    boxShadow: '0 4px 10px rgba(0,0,0,0.08)',
-    textAlign: 'center',
-    width: '170px',
-    borderTop: '4px solid #22c55e',
-  },
-
-  devImg: {
-    width: '120px',
-    height: '120px',
-    objectFit: 'cover',
-    borderRadius: '50%',
-    marginBottom: '12px',
-  },
-
+  topImageContainer: { display: 'flex', justifyContent: 'center', marginBottom: '25px' },
+  topImage: { width: '150px', height: 'auto' },
+  header: { fontSize: '2.4rem', color: '#0f172a', fontWeight: '700', marginBottom: '30px' },
+  descGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '50px' },
+  descCard: { backgroundColor: '#f1f5f9', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', fontSize: '1rem', lineHeight: '1.6', color: '#1e293b' },
+  sectionHeader: { fontSize: '2rem', color: '#0f172a', marginBottom: '30px', fontWeight: '700' },
+  devGrid: { display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '25px', marginBottom: '50px' },
+  devCard: { backgroundColor: '#f8fafc', borderRadius: '12px', padding: '20px', width: '180px', boxShadow: '0 4px 10px rgba(0,0,0,0.08)', transition: 'transform 0.3s', cursor: 'pointer' },
+  devImg: { width: '120px', height: '120px', borderRadius: '50%', objectFit: 'cover', marginBottom: '12px' },
   devName: { fontSize: '1rem', fontWeight: '600', marginBottom: '4px' },
   devCourse: { fontSize: '0.85rem', marginBottom: '6px', color: '#475569' },
-  devDesc: { fontSize: '0.8rem', lineHeight: '1.4', color: '#64748b' },
-
-  albumContainer: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-    gap: '20px',
-    justifyItems: 'center',
-    marginTop: '20px',
-  },
-
-  albumItem: {
-    backgroundColor: '#0F172A',
-    padding: '10px',
-    borderRadius: '10px',
-    boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
-    cursor: 'pointer',
-  },
-
-  albumImg: {
-    width: '100%',
-    height: '200px',
-    objectFit: 'cover',
-    borderRadius: '5px',
-  },
-
+  devDesc: { fontSize: '0.8rem', color: '#64748b' },
+  albumContainer: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', justifyItems: 'center', marginBottom: '50px' },
+  albumItem: { backgroundColor: '#0f172a', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', cursor: 'pointer', transition: '0.3s' },
+  albumImg: { width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px' },
   caption: { color: '#fff', marginTop: '8px', fontSize: '0.85rem', textAlign: 'center' },
-
-  overlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000,
-  },
-
-  lightbox: {
-    position: 'relative',
-    backgroundColor: '#fff',
-    padding: '20px',
-    borderRadius: '12px',
-    boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
-    maxWidth: '80%',
-    maxHeight: '80%',
-  },
-
-  lightboxImg: { width: '100%', maxHeight: '70vh', objectFit: 'contain' },
-
-  closeBtn: { position: 'absolute', top: '10px', right: '15px', background: 'transparent', border: 'none', fontSize: '2rem', color: '#333', cursor: 'pointer' },
-
-  footer: { marginTop: '60px', paddingTop: '20px', borderTop: '1px solid #ddd', fontSize: '0.9rem', color: '#64748b', textAlign: 'center' },
+  overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
+  lightbox: { position: 'relative', backgroundColor: '#fff', padding: '20px', borderRadius: '12px', maxWidth: '80%', maxHeight: '80%', textAlign: 'center' },
+  lightboxImg: { width: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: '8px' },
+  closeBtn: { position: 'absolute', top: '10px', right: '15px', background: 'transparent', border: 'none', fontSize: '2rem', cursor: 'pointer' },
+  lightboxCaption: { marginTop: '10px', fontSize: '0.9rem', color: '#1e293b' },
+  footer: { fontSize: '0.9rem', color: '#475569', borderTop: '1px solid #ddd', paddingTop: '20px', marginTop: '40px' }
 };
 
 export default About;
