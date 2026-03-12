@@ -6,10 +6,10 @@ const About = () => {
 
   const developers = [
     { name: "Dhafny Buenafe", course: "BS Computer Engineering", desc: "Specializes in Intelligent Systems.", img: "Buenafe.png", role: "Team Lead", email: "dhafnybuenafe01@email.com" },
-    { name: "Patrick Jordan Cabanatan", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Cabanatan.png", role: "Backend Dev", email: "patrick@email.com" },
-    { name: "Jethro Duque", course: "BS Computer Engineering", desc: "Specializes in Railway Engineering.", img: "Duque.jpg", role: "Frontend Dev", email: "jethro@email.com" },
-    { name: "Rens Españo", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Espano.png", role: "QA Tester", email: "rens@email.com" },
-    { name: "Justin Jello Repani", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Repani.png", role: "UI Designer", email: "justin@email.com" }
+    { name: "Patrick Jordan Cabanatan", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Cabanatan.png", role: "Backend Dev", email: "cabanatan.patrick@gmail.com" },
+    { name: "Jethro Duque", course: "BS Computer Engineering", desc: "Specializes in Railway Engineering.", img: "Duque.jpg", role: "Frontend Dev", email: "jethroduque1127@gmail.com" },
+    { name: "Rens Españo", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Espano.png", role: "QA Tester", email: "rens7363surespsurpano@gmail.com" },
+    { name: "Justin Jello Repani", course: "BS Computer Engineering", desc: "Specializes in Systems Administration.", img: "Repani.png", role: "UI Designer", email: "acadjelrep@gmail.com" }
   ];
 
   const prototypeImages = [
