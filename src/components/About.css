@@ -38,7 +38,7 @@
 
 .flipBack {
   background-color: #0F1B34;
-  color: #1e293b;
+  color: #fff;
   transform: rotateY(180deg);
   font-size: 0.85rem;
 }
