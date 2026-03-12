@@ -74,7 +74,7 @@ const About = () => {
         </div>
 
         {/* Prototype Section */}
-        <div style={styles.sectionHeader}>Prototype Gallery</div>
+        <div style={styles.sectionHeader}>Prototype 3D</div>
 
         <div style={styles.albumContainer}>
           {prototypeImages.map((item, index) => (
@@ -151,7 +151,7 @@ const styles = {
   },
 
   descCard: {
-    backgroundColor: '#f1f5f9',
+    backgroundColor: '#1E293B',
     padding: '20px',
     borderRadius: '12px',
     boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
@@ -175,7 +175,8 @@ const styles = {
 
   devName: {
     fontSize: '1rem',
-    fontWeight: '600'
+    fontWeight: '600',
+    color: '#1E293B'
   },
 
   devCourse: {
