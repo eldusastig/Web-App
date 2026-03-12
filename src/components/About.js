@@ -47,7 +47,7 @@ const About = () => {
       </div>
 
       {/* Developers */}
-      <div className="sectionHeader">Meet the Developers</div>
+      <div style={styles.sectionHeader}>Meet the Developers</div>
       <div style={styles.devGrid}>
         {developers.map((dev, index) => (
           <div key={index} className="flip-card">
@@ -59,8 +59,8 @@ const About = () => {
               </div>
               <div className="flipBack">
                 <h3>{dev.name}</h3>
-                <p style={{wordBreak: "break-all"}}>Role: {dev.role}</p>
-                <p style={{wordBreak: "break-all"}}>Email: {dev.email}</p>
+                <p>Role: {dev.role}</p>
+                <p className="email">{dev.email}</p>
                 <p>{dev.desc}</p>
               </div>
             </div>
@@ -69,7 +69,7 @@ const About = () => {
       </div>
 
       {/* Prototype Gallery */}
-      <div className="sectionHeader">Prototype Gallery</div>
+      <div style={styles.sectionHeader}>Prototype Gallery</div>
       <div className="albumContainer">
         {prototypeImages.map((item, index) => (
           <div
@@ -118,9 +118,10 @@ const styles = {
   },
   topImageContainer: { display: 'flex', justifyContent: 'center', marginBottom: '25px' },
   topImage: { width: '150px' },
-  header: { fontSize: '2.4rem', fontWeight: '700', marginBottom: '30px', color:'#000' }, 
+  header: { fontSize: '2.4rem', fontWeight: '700', marginBottom: '30px', color:'#080402' },
   descGrid: { display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '20px', marginBottom: '50px' },
   descCard: { backgroundColor: '#0F1B34', padding: '20px', borderRadius: '12px' },
+  sectionHeader: { fontSize: '2rem', marginBottom: '30px', fontWeight: '700', color:'#080402' },
   devGrid: { display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '25px', marginBottom: '50px' },
   devImg: { width: '120px', height: '120px', borderRadius: '50%', objectFit: 'cover', marginBottom: '12px' },
   devName: { fontSize: '1rem', fontWeight: '600', color: '#fff' },
