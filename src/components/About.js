@@ -130,7 +130,7 @@ const styles = {
   devImg: { width: '120px', height: '120px', borderRadius: '50%', objectFit: 'cover', marginBottom: '12px' },
   devName: { fontSize: '1rem', fontWeight: '600', color: '#fff' },
   devCourse: { fontSize: '0.85rem', color: '#fff' },
-  albumContainer: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '20px' , backgroundColor: '#1E293B',
+  albumContainer: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '20px' , backgroundColor: '#1E293B' },
   albumItem: { cursor: 'pointer' },
   albumImg: { width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px' },
   caption: { marginTop: '8px', fontSize: '0.85rem', color: '#1E293B' },
