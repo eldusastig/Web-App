@@ -71,20 +71,37 @@ const About = () => {
       {/* Prototype Gallery */}
       <div style={styles.sectionHeader}>Prototype Gallery</div>
       <div style={styles.albumContainer}>
-        {prototypeImages.map((item, index) => (
-          <div
-            key={index}
-            style={styles.albumItem}
-            onClick={() => setSelectedImage({ img: item.img, index })}
-          >
-            <img
-              src={item.img}
-              alt={`Prototype ${index + 1}`}
-              style={styles.albumImg}
-            />
-            <p style={styles.caption}>{item.label}</p>
-          </div>
-        ))}
+        {prototypeImages.map((item, index) => {
+          const [hover, setHover] = useState(false);
+
+          return (
+            <div
+              key={index}
+              style={{
+                ...styles.albumItem,
+                transform: hover ? 'scale(1.05)' : 'scale(1)',
+                boxShadow: hover ? '0 8px 20px rgba(0,0,0,0.3)' : 'none'
+              }}
+              onClick={() => setSelectedImage({ img: item.img, index })}
+              onMouseEnter={() => setHover(true)}
+              onMouseLeave={() => setHover(false)}
+            >
+              <img
+                src={item.img}
+                alt={`Prototype ${index + 1}`}
+                style={styles.albumImg}
+              />
+              <div
+                style={{
+                  ...styles.captionOverlay,
+                  opacity: hover ? 1 : 0
+                }}
+              >
+                {item.label}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Lightbox */}
@@ -118,22 +135,22 @@ const styles = {
     textAlign: 'center',
     display: 'flex',
     flexDirection: 'column',
-    margin: '20px auto' // center the container
+    margin: '20px auto'
   },
   topImageContainer: { display: 'flex', justifyContent: 'center', marginBottom: '25px' },
   topImage: { width: '150px' },
   header: { fontSize: '2.4rem', fontWeight: '700', marginBottom: '30px', color:'#0F1B34' },
   descGrid: { display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '20px', marginBottom: '50px' },
   descCard: { backgroundColor: '#0F1B34', padding: '20px', borderRadius: '12px' },
-  sectionHeader: { fontSize: '2rem', marginBottom: '30px', fontWeight: '700' },
+  sectionHeader: { fontSize: '2rem', marginBottom: '30px', fontWeight: '700', color:'#1E293B' },
   devGrid: { display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '25px', marginBottom: '50px' },
   devImg: { width: '120px', height: '120px', borderRadius: '50%', objectFit: 'cover', marginBottom: '12px' },
   devName: { fontSize: '1rem', fontWeight: '600', color: '#fff' },
   devCourse: { fontSize: '0.85rem', color: '#fff' },
-  albumContainer: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '20px' },
-  albumItem: { cursor: 'pointer' },
-  albumImg: { width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px' },
-  caption: { marginTop: '8px', fontSize: '0.85rem', color: '#1E293B' },
+  albumContainer: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' },
+  albumItem: { cursor: 'pointer', position: 'relative', overflow: 'hidden', borderRadius: '8px', transition: 'transform 0.3s ease, box-shadow 0.3s ease' },
+  albumImg: { width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px', display: 'block' },
+  captionOverlay: { position: 'absolute', bottom: '0', width: '100%', padding: '5px 0', backgroundColor: 'rgba(0,0,0,0.5)', color: '#fff', textAlign: 'center', transition: 'opacity 0.3s ease' },
   overlay: { position: 'fixed', top:0, left:0, right:0, bottom:0, backgroundColor:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center' },
   lightbox: { background:'#fff', padding:'20px', borderRadius:'12px', maxWidth:'700px', width:'90%', position:'relative' },
   lightboxImg: { width:'100%', maxHeight:'70vh', objectFit:'contain' },
