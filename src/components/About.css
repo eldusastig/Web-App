@@ -33,12 +33,11 @@
 }
 
 .flipFront {
-  background-color: #f8fafc;
-  color: #1e293b;
+  background-color: #7095e0;
 }
 
 .flipBack {
-  background-color: ##0F1B34;
+  background-color: #0F1B34;
   color: #1e293b;
   transform: rotateY(180deg);
   font-size: 0.85rem;
