@@ -12,12 +12,12 @@ const About = () => {
   ];
 
   const prototypeImages = [
-    { img: "Ecotrack1.jpg", label: "3D Prototype Front View" },
-    { img: "Ecotrack2.jpg", label: "3D Prototype Side View" },
-    { img: "Ecotrack3.jpg", label: "Internal Mechanism" },
-    { img: "Ecotrack4.jpg", label: "Debris Collection System" },
-    { img: "Ecotrack5.jpg", label: "Drainage Integration" },
-    { img: "Ecotrack6.jpg", label: "Final Assembly" }
+    { img: "Ecotrack3.jpg", label: "3D Prototype Front View" },
+    { img: "Ecotrack4.jpg", label: "3D Prototype Side View" },
+    { img: "Ecotrack6.jpg", label: "3D Prototype Top View" },
+    { img: "Ecotrack5.jpg", label: "3D Prototype Back View" },
+    { img: "Ecotrack2.jpg", label: "Overall 3D Prototype" },
+    { img: "Ecotrack1.jpg", label: "Final Assembly" }
   ];
 
   return (
@@ -31,40 +31,42 @@ const About = () => {
       {/* About Section */}
       <div style={styles.header}>About the Debris Detection System</div>
 
-      <p style={styles.description}>
-        This system is designed to detect and remove <b>debris from drainage inlets</b>, aiming to improve sewer maintenance and prevent <b>urban flooding</b>.
-      </p>
+      <div style={styles.descGrid}>
+        <div style={styles.descCard}>
+          <p>
+            <strong>Debris Removal:</strong> This system detects and removes debris from drainage inlets, improving sewer maintenance and preventing urban flooding.
+          </p>
+        </div>
 
-      <p style={styles.description}>
-        The prototype monitors grate-type drainage inlets, sends alerts when the collecting bin is full, detects signs of flooding, and identifies the system’s location for easy tracking.
-      </p>
+        <div style={styles.descCard}>
+          <p>
+            <strong>Monitoring & Alerts:</strong> It monitors grate-type drainage inlets, sends alerts when the collecting bin is full, detects signs of flooding, and tracks the system’s location for easy management.
+          </p>
+        </div>
 
-      <p style={styles.description}>
-        Our goal is to create a functional, efficient, and cost-effective solution that adheres to engineering standards and considers economic, environmental, safety, and cultural factors in all design decisions.
-      </p>
+        <div style={styles.descCard}>
+          <p>
+            <strong>Design Goals:</strong> Our goal is to create a functional, efficient, and cost-effective solution that follows engineering standards and considers economic, environmental, safety, and cultural factors.
+          </p>
+        </div>
 
-      <p style={styles.lastDescription}>
-        We are testing and evaluating the system’s accuracy to ensure reliability and performance in real-world conditions.
-      </p>
+        <div style={styles.descCard}>
+          <p>
+            <strong>Testing & Reliability:</strong> We are continuously testing and evaluating the system’s accuracy to ensure performance in real-world conditions.
+          </p>
+        </div>
+      </div>
 
-      {/* Developers */}
+      {/* Developers Section */}
       <div style={styles.sectionHeader}>Meet the Developers</div>
 
       <div style={styles.devGrid}>
         {developers.map((dev, index) => (
           <div key={index} style={styles.devCard} className="dev-card">
-
-            <img
-              src={dev.img}
-              alt={dev.name}
-              style={styles.devImg}
-              className="dev-img"
-            />
-
+            <img src={dev.img} alt={dev.name} style={styles.devImg} className="dev-img" />
             <h3 style={styles.devName}>{dev.name}</h3>
             <p style={styles.devCourse}>{dev.course}</p>
             <p style={styles.devDesc}>{dev.desc}</p>
-
           </div>
         ))}
       </div>
@@ -77,24 +79,39 @@ const About = () => {
           <div
             key={index}
             style={styles.albumItem}
-            onClick={() => setSelectedImage(item.img)}
+            onClick={() => setSelectedImage({ img: item.img, index })}
           >
-            <img
-              src={item.img}
-              alt={`Prototype ${index + 1}`}
-              style={styles.albumImg}
-            />
+            <img src={item.img} alt={`Prototype ${index + 1}`} style={styles.albumImg}/>
             <p style={styles.caption}>{item.label}</p>
           </div>
         ))}
       </div>
 
-      {/* Image Lightbox */}
+      {/* Lightbox */}
       {selectedImage && (
         <div style={styles.overlay} onClick={() => setSelectedImage(null)}>
-          <div style={styles.lightbox}>
-            <img src={selectedImage} alt="Prototype" style={styles.lightboxImg}/>
+          <div style={styles.lightbox} onClick={e => e.stopPropagation()}>
+            <img src={selectedImage.img} alt="Prototype" style={styles.lightboxImg}/>
             <button style={styles.closeBtn} onClick={() => setSelectedImage(null)}>×</button>
+
+            {/* Navigation */}
+            <button
+              style={{...styles.navBtn, left: '10px'}}
+              onClick={() => {
+                const prev = (selectedImage.index - 1 + prototypeImages.length) % prototypeImages.length;
+                setSelectedImage({ img: prototypeImages[prev].img, index: prev });
+              }}
+            >‹</button>
+
+            <button
+              style={{...styles.navBtn, right: '10px'}}
+              onClick={() => {
+                const next = (selectedImage.index + 1) % prototypeImages.length;
+                setSelectedImage({ img: prototypeImages[next].img, index: next });
+              }}
+            >›</button>
+
+            <p style={styles.lightboxCaption}>{prototypeImages[selectedImage.index].label}</p>
           </div>
         </div>
       )}
@@ -123,45 +140,13 @@ const About = () => {
           .dev-card:hover .dev-img {
             transform: scale(1.05);
           }
-
-          .albumItem {
-            position: relative;
-            overflow: hidden;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-            cursor: pointer;
-          }
-
-          .albumItem:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
-          }
-
-          .albumImg {
-            transition: transform 0.3s ease;
-          }
-
-          .albumItem:hover .albumImg {
-            transform: scale(1.1);
-          }
-
-          .sectionHeader::after {
-            content: "";
-            display: block;
-            width: 60%;
-            height: 3px;
-            background: #22c55e;
-            margin: 8px auto 0;
-            border-radius: 2px;
-          }
         `}
       </style>
-
     </div>
   );
 };
 
 const styles = {
-
   container: {
     backgroundColor: '#ffffff',
     width: '85%',
@@ -194,16 +179,23 @@ const styles = {
     fontWeight: '700',
   },
 
-  description: {
-    fontSize: '1.1rem',
-    lineHeight: '1.8',
-    color: '#555',
-    marginBottom: '18px',
-    textAlign: 'justify',
+  descGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+    gap: '20px',
+    marginBottom: '40px',
   },
 
-  lastDescription: {
-    marginBottom: '50px',
+  descCard: {
+    backgroundColor: '#f1f5f9',
+    padding: '20px',
+    borderRadius: '12px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+    textAlign: 'left',
+    fontSize: '1rem',
+    lineHeight: '1.8',
+    color: '#1e293b',
+    transition: 'transform 0.3s ease, box-shadow 0.3s ease',
   },
 
   sectionHeader: {
@@ -274,6 +266,7 @@ const styles = {
     padding: '10px',
     borderRadius: '10px',
     boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
+    cursor: 'pointer',
   },
 
   albumImg: {
@@ -328,6 +321,27 @@ const styles = {
     fontSize: '2rem',
     color: '#333',
     cursor: 'pointer',
+  },
+
+  navBtn: {
+    position: 'absolute',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    background: 'rgba(0,0,0,0.4)',
+    color: '#fff',
+    border: 'none',
+    fontSize: '2rem',
+    padding: '10px 15px',
+    cursor: 'pointer',
+    borderRadius: '5px',
+    zIndex: 1010,
+  },
+
+  lightboxCaption: {
+    color: '#333',
+    marginTop: '10px',
+    fontSize: '0.9rem',
+    textAlign: 'center',
   },
 
   footer: {
