@@ -132,7 +132,7 @@ const styles = {
   devCourse: { fontSize: '0.85rem', color: '#fff' },
   albumContainer: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '20px' },
   albumItem: { cursor: 'pointer' },
-  albumImg: { width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px' ,backgroundColor:'#0F1B34' },
+  albumImg: { width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px' },
   caption: { marginTop: '8px', fontSize: '0.85rem', color: '#1E293B' },
   overlay: { position: 'fixed', top:0, left:0, right:0, bottom:0, backgroundColor:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center' },
   lightbox: { background:'#fff', padding:'20px', borderRadius:'12px', maxWidth:'700px', width:'90%', position:'relative' },
