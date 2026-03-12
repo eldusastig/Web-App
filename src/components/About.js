@@ -12,12 +12,12 @@ const About = () => {
   ];
 
   const prototypeImages = [
-    "Ecotrack1.jpg",
-    "Ecotrack2.jpg",
-    "Ecotrack3.jpg",
-    "Ecotrack4.jpg",
-    "Ecotrack5.jpg",
-    "Ecotrack6.jpg",
+    { img: "Ecotrack1.jpg", label: "3D Prototype Front View" },
+    { img: "Ecotrack2.jpg", label: "3D Prototype Side View" },
+    { img: "Ecotrack3.jpg", label: "Internal Mechanism" },
+    { img: "Ecotrack4.jpg", label: "Debris Collection System" },
+    { img: "Ecotrack5.jpg", label: "Drainage Integration" },
+    { img: "Ecotrack6.jpg", label: "Final Assembly" }
   ];
 
   return (
@@ -32,7 +32,7 @@ const About = () => {
       <div style={styles.header}>About the Debris Detection System</div>
 
       <p style={styles.description}>
-        This system is designed to detect and remove debris from drainage inlets, aiming to improve sewer maintenance and prevent urban flooding.
+        This system is designed to detect and remove <b>debris from drainage inlets</b>, aiming to improve sewer maintenance and prevent <b>urban flooding</b>.
       </p>
 
       <p style={styles.description}>
@@ -73,17 +73,18 @@ const About = () => {
       <div style={styles.sectionHeader}>Prototype</div>
 
       <div style={styles.albumContainer}>
-        {prototypeImages.map((img, index) => (
+        {prototypeImages.map((item, index) => (
           <div
             key={index}
             style={styles.albumItem}
-            onClick={() => setSelectedImage(img)}
+            onClick={() => setSelectedImage(item.img)}
           >
             <img
-              src={img}
+              src={item.img}
               alt={`Prototype ${index + 1}`}
               style={styles.albumImg}
             />
+            <p style={styles.caption}>{item.label}</p>
           </div>
         ))}
       </div>
@@ -98,6 +99,11 @@ const About = () => {
         </div>
       )}
 
+      {/* Footer */}
+      <div style={styles.footer}>
+        © 2026 EcoTrack Debris Detection System | BS Computer Engineering
+      </div>
+
       {/* Hover Effects */}
       <style>
         {`
@@ -107,7 +113,7 @@ const About = () => {
 
           .dev-card:hover {
             transform: translateY(-6px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+            box-shadow: 0 12px 25px rgba(34,197,94,0.25);
           }
 
           .dev-img {
@@ -116,6 +122,36 @@ const About = () => {
 
           .dev-card:hover .dev-img {
             transform: scale(1.05);
+          }
+
+          .albumItem {
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            cursor: pointer;
+          }
+
+          .albumItem:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+          }
+
+          .albumImg {
+            transition: transform 0.3s ease;
+          }
+
+          .albumItem:hover .albumImg {
+            transform: scale(1.1);
+          }
+
+          .sectionHeader::after {
+            content: "";
+            display: block;
+            width: 60%;
+            height: 3px;
+            background: #22c55e;
+            margin: 8px auto 0;
+            border-radius: 2px;
           }
         `}
       </style>
@@ -148,6 +184,7 @@ const styles = {
     width: '100%',
     maxWidth: '280px',
     height: 'auto',
+    filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.2))'
   },
 
   header: {
@@ -175,12 +212,10 @@ const styles = {
     marginTop: '50px',
     marginBottom: '30px',
     fontWeight: '700',
-    borderBottom: '2px solid #ddd',
+    position: 'relative',
     display: 'inline-block',
-    paddingBottom: '5px',
   },
 
-  /* Developers layout */
   devGrid: {
     display: 'flex',
     justifyContent: 'center',
@@ -197,6 +232,7 @@ const styles = {
     boxShadow: '0 4px 10px rgba(0,0,0,0.08)',
     textAlign: 'center',
     width: '170px',
+    borderTop: '4px solid #22c55e',
   },
 
   devImg: {
@@ -225,10 +261,9 @@ const styles = {
     color: '#64748b',
   },
 
-  /* Prototype album */
   albumContainer: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
     gap: '20px',
     justifyItems: 'center',
     marginTop: '20px',
@@ -239,7 +274,6 @@ const styles = {
     padding: '10px',
     borderRadius: '10px',
     boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
-    cursor: 'pointer',
   },
 
   albumImg: {
@@ -249,7 +283,13 @@ const styles = {
     borderRadius: '5px',
   },
 
-  /* Lightbox */
+  caption: {
+    color: '#fff',
+    marginTop: '8px',
+    fontSize: '0.85rem',
+    textAlign: 'center',
+  },
+
   overlay: {
     position: 'fixed',
     top: 0,
@@ -290,6 +330,13 @@ const styles = {
     cursor: 'pointer',
   },
 
+  footer: {
+    marginTop: '60px',
+    paddingTop: '20px',
+    borderTop: '1px solid #ddd',
+    fontSize: '0.9rem',
+    color: '#64748b'
+  },
 };
 
 export default About;
