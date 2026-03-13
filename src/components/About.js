@@ -17,8 +17,8 @@ const About = () => {
     { img: "Side.png", label: "3D Prototype Side View" },
     { img: "Top.png", label: "3D Prototype Top View" },
     { img: "Back.png", label: "3D Prototype Back View" },
-    { img: "Internal.png", label: "Internal Mechanism" },
-    { img: "Overall.png", label: "Overall 3D Prototype" }
+    { img: "Internal.jpg", label: "Internal Mechanism" },
+    { img: "Overall.jpg", label: "Overall 3D Prototype" }
   ];
 
   return (
