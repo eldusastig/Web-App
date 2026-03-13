@@ -26,14 +26,14 @@ const About = () => {
 
       {/* Logo */}
       <div style={styles.topImageContainer}>
-        <img src="EcotrackLogo.png" alt="Debris Detection System" style={styles.topImage}/>
+        <img src="EcotrackLogo.png" alt="Rubbish Detection System" style={styles.topImage}/>
       </div>
 
       {/* About Section */}
       <div style={styles.header}>About the Debris Detection System</div>
       <div style={styles.descGrid}>
         <div style={styles.descCard}>
-          <p><strong>Debris Removal:</strong> Detects and removes debris from drainage inlets, improving sewer maintenance and preventing urban flooding.</p>
+          <p><strong>Debris Removal:</strong> Detects and removes rubbish from drainage inlets, improving sewer maintenance and preventing urban flooding.</p>
         </div>
         <div style={styles.descCard}>
           <p><strong>Monitoring & Alerts:</strong> Monitors grate-type drainage inlets, sends alerts when bins are full, detects flooding, and tracks system location.</p>
@@ -95,7 +95,7 @@ const About = () => {
 
       {/* Footer */}
       <div style={styles.footer}>
-        © 2026 EcoTrack Debris Detection System | BS Computer Engineering
+        © 2026 EcoTrack Rubbish Detection System | BS Computer Engineering
       </div>
 
     </div>
