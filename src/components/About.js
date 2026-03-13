@@ -30,7 +30,7 @@ const About = () => {
       </div>
 
       {/* About Section */}
-      <div style={styles.header}>About the Debris Detection System</div>
+      <div style={styles.header}>About the Rubbish Detection System</div>
       <div style={styles.descGrid}>
         <div style={styles.descCard}>
           <p><strong>Debris Removal:</strong> Detects and removes rubbish from drainage inlets, improving sewer maintenance and preventing urban flooding.</p>
