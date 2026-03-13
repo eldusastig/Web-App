@@ -13,12 +13,12 @@ const About = () => {
   ];
 
   const prototypeImages = [
-    { img: "Ecotrack3.jpg", label: "3D Prototype Front View" },
-    { img: "Ecotrack4.jpg", label: "3D Prototype Side View" },
-    { img: "Ecotrack6.jpg", label: "3D Prototype Top View" },
-    { img: "Ecotrack5.jpg", label: "3D Prototype Back View" },
-    { img: "Ecotrack2.jpg", label: "Overall 3D Prototype" },
-    { img: "Ecotrack1.jpg", label: "Final Assembly" }
+    { img: "Front.png", label: "3D Prototype Front View" },
+    { img: "Side.png", label: "3D Prototype Side View" },
+    { img: "Top.png", label: "3D Prototype Top View" },
+    { img: "Back.png", label: "3D Prototype Back View" },
+    { img: "Internal.png", label: "Internal Mechanism" },
+    { img: "Overall.png", label: "Overall 3D Prototype" }
   ];
 
   return (
