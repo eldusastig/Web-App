@@ -208,11 +208,20 @@ export const MetricsProvider = ({ children }) => {
     }
 
     // Flooded
-    if (payload && (payload.flooded === true || payload.flood === true)) {
-      dev.flooded = true;
-    } else if (payload && (payload.flooded === false || payload.flood === false)) {
-      dev.flooded = false;
+    if (payload) {
+      if (payload.flooded === true || payload.flood === true) {
+          dev.flooded = true;
+      } else if (payload.flooded === false || payload.flood === false) {
+      // Only clear flood if the message EXPLICITLY says flooded: false
+      // Messages that don't mention flooded at all will not touch this flag
+      const hasExplicitFloodField = 
+        Object.prototype.hasOwnProperty.call(payload, 'flooded') ||
+        Object.prototype.hasOwnProperty.call(payload, 'flood');
+      if (hasExplicitFloodField) {
+        dev.flooded = false;
+      }
     }
+  }
     // Collection Error
     if (payload && typeof payload.collectionError === 'boolean') {
       dev.collectionError = payload.collectionError;
