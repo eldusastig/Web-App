@@ -270,6 +270,7 @@ const s = StyleSheet.create({
     fontFamily: "'DM Sans', sans-serif",
     color: '#E2E8F0',
     boxSizing: 'border-box',
+    marginLeft: '40px',
   },
   title: {
     fontSize: '1.5rem',
@@ -289,7 +290,6 @@ const s = StyleSheet.create({
     marginBottom: '20px',
     border: '1px solid rgba(255,255,255,0.06)',
     boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
-    marginLeft: '40px',
   },
   listCard: {
     backgroundColor: '#1E293B',
