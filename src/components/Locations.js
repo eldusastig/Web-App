@@ -18,52 +18,61 @@ import { FiMapPin } from 'react-icons/fi';
 import { DeviceContext } from '../DeviceContext';
 import { LocationContext } from '../LocationContext';
 
-// icons
+// ─── Inject dark popup styles to match Dashboard ──────────────────────────────
+const locationPopupFix = document.createElement('style');
+locationPopupFix.textContent = `
+  .leaflet-popup { z-index: 1000 !important; }
+  .leaflet-popup-content-wrapper {
+    background: #1E293B !important;
+    color: #E2E8F0 !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
+  }
+  .leaflet-popup-tip {
+    background: #1E293B !important;
+  }
+  .leaflet-popup-content {
+    margin: 12px 16px !important;
+    font-size: 0.875rem !important;
+    line-height: 1.6 !important;
+  }
+  .leaflet-container a.leaflet-popup-close-button {
+    color: #94A3B8 !important;
+  }
+`;
+if (!document.getElementById('location-popup-fix')) {
+  locationPopupFix.id = 'location-popup-fix';
+  document.head.appendChild(locationPopupFix);
+}
+
+// ─── Icons ────────────────────────────────────────────────────────────────────
 const greenIcon = new L.Icon({
-  iconUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-  shadowSize: [41, 41],
-  className: 'leaflet-marker-green',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+  shadowSize: [41, 41], className: 'leaflet-marker-green',
 });
 const orangeIcon = new L.Icon({
-  iconUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-  shadowSize: [41, 41],
-  className: 'leaflet-marker-orange',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+  shadowSize: [41, 41], className: 'leaflet-marker-orange',
 });
 const redIcon = new L.Icon({
-  iconUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-  shadowSize: [41, 41],
-  className: 'leaflet-marker-red',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+  shadowSize: [41, 41], className: 'leaflet-marker-red',
 });
 const grayIcon = new L.Icon({
-  iconUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-  shadowSize: [41, 41],
-  className: 'leaflet-marker-gray',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+  shadowSize: [41, 41], className: 'leaflet-marker-gray',
 });
 
+// ─── PanToDevice ──────────────────────────────────────────────────────────────
 function PanToDevice({ selectedDeviceId, devicesToShow, userMovedMap }) {
   const map = useMapEvents({
     dragstart: () => (userMovedMap.current = true),
@@ -81,28 +90,28 @@ function PanToDevice({ selectedDeviceId, devicesToShow, userMovedMap }) {
   return null;
 }
 
+// ─── Locations ────────────────────────────────────────────────────────────────
 export default function Locations() {
-  const { devices } = useContext(DeviceContext); // metadata
-  const { locations } = useContext(LocationContext); // lat/lon from LocationContext
+  const { devices } = useContext(DeviceContext);
+  const { locations } = useContext(LocationContext);
   const [selectedDeviceId, setSelectedDeviceId] = useState(null);
   const [deviceAddresses, setDeviceAddresses] = useState({});
   const [showFlooded, setShowFlooded] = useState(false);
   const [showBinFull, setShowBinFull] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
   const userMovedMap = useRef(false);
+  const fetchQueueRef = useRef(new Map());
 
   // quick lookup of metadata by id
   const metaById = useMemo(() => {
     const m = new Map();
-    (devices || []).forEach((d) => {
-      if (d && d.id) m.set(String(d.id), d);
-    });
+    (devices || []).forEach((d) => { if (d && d.id) m.set(String(d.id), d); });
     return m;
   }, [devices]);
 
   // merge authoritative locations with device metadata
   const mergedDevices = useMemo(() => {
-    const out = (locations || []).map((loc) => {
+    return (locations || []).map((loc) => {
       const id = String(loc.id);
       const meta = metaById.get(id) || {};
       return {
@@ -114,16 +123,10 @@ export default function Locations() {
         binFull: meta.binFull ?? meta.bin_full ?? (meta.fillPct ? (Number(meta.fillPct) >= 90) : false),
         active: meta.active ?? meta.online ?? true,
         name: meta.name ?? meta.label ?? id,
+        fillPct: meta.fillPct ?? loc.fillPct ?? null,
         rawMeta: meta,
       };
     });
-    // debug helpers
-    if (process.env.NODE_ENV !== 'production') {
-      console.debug('Locations: mergedDevices', out);
-      const metaWithoutLoc = (devices || []).filter(md => md && md.id && !locations.find(l => String(l.id) === String(md.id)));
-      if (metaWithoutLoc.length) console.debug('Locations: meta devices without GPS', metaWithoutLoc);
-    }
-    return out;
   }, [locations, metaById, devices]);
 
   // apply filters
@@ -138,46 +141,27 @@ export default function Locations() {
     });
   }, [mergedDevices, showFlooded, showBinFull, showInactive]);
 
-  // simple queue/throttle to avoid firing lots of requests at once
-  const fetchQueueRef = useRef(new Map()); // id -> promise flag
-
+  // Reverse geocode — same staggered pattern as Dashboard
   useEffect(() => {
-    // For each visible device with coordinates and no cached address, fetch an address
     devicesToShow.forEach((device, idx) => {
       const { id, lat, lon } = device;
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-      if (deviceAddresses[id]) return; // already cached
-
-      // If a fetch is already pending for this id, skip
+      if (deviceAddresses[id]) return;
       if (fetchQueueRef.current.get(id)) return;
 
-      // polite throttle: stagger requests by index (small delay)
       fetchQueueRef.current.set(id, true);
-      const delayMs = Math.min(2000, idx * 300); // stagger, but cap at 2s
+      const delayMs = Math.min(2000, idx * 300);
       setTimeout(async () => {
         try {
-          // build correct URL using template literal (fixed!)
           const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
-          // Debug log
-          if (process.env.NODE_ENV !== 'production') console.debug('Reverse geocoding', id, { lat, lon, url });
-
-          // Nominatim is public and supports CORS; keep usage polite and cache results.
-          const res = await fetch(url, {
-            // do NOT attempt to set 'User-Agent' in browser JS; Nominatim will see a browser UA automatically.
-            headers: {
-              'Accept': 'application/json'
-            },
-          });
+          const res = await fetch(url, { headers: { Accept: 'application/json' } });
           if (!res.ok) {
-            console.warn('Reverse geocode failed (http)', res.status, res.statusText);
             setDeviceAddresses(prev => ({ ...prev, [id]: 'No address (HTTP ' + res.status + ')' }));
           } else {
             const data = await res.json();
-            const address = data.display_name || 'Unknown location';
-            setDeviceAddresses(prev => ({ ...prev, [id]: address }));
+            setDeviceAddresses(prev => ({ ...prev, [id]: data.display_name || 'Unknown location' }));
           }
         } catch (err) {
-          console.warn('Reverse geocode error for', id, err);
           setDeviceAddresses(prev => ({ ...prev, [id]: 'No address found' }));
         } finally {
           fetchQueueRef.current.delete(id);
@@ -201,29 +185,15 @@ export default function Locations() {
 
       <div style={styles.filterContainer}>
         <label style={styles.filterLabel}>
-          <input
-            type="checkbox"
-            checked={showFlooded}
-            onChange={(e) => setShowFlooded(e.target.checked)}
-          />{' '}
+          <input type="checkbox" checked={showFlooded} onChange={(e) => setShowFlooded(e.target.checked)} />{' '}
           Flooded
         </label>
-
         <label style={styles.filterLabel}>
-          <input
-            type="checkbox"
-            checked={showBinFull}
-            onChange={(e) => setShowBinFull(e.target.checked)}
-          />{' '}
+          <input type="checkbox" checked={showBinFull} onChange={(e) => setShowBinFull(e.target.checked)} />{' '}
           Bin Full
         </label>
-
         <label style={styles.filterLabel}>
-          <input
-            type="checkbox"
-            checked={showInactive}
-            onChange={(e) => setShowInactive(e.target.checked)}
-          />{' '}
+          <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />{' '}
           Inactive
         </label>
       </div>
@@ -239,7 +209,6 @@ export default function Locations() {
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
           {devicesToShow.map((device) => {
-            const address = deviceAddresses[device.id];
             let iconToUse = greenIcon;
             if (device.flooded) iconToUse = redIcon;
             else if (device.binFull) iconToUse = orangeIcon;
@@ -253,15 +222,26 @@ export default function Locations() {
                 eventHandlers={{ click: () => setSelectedDeviceId(device.id) }}
               >
                 <Popup>
-                  <b>{device.name || device.id}</b>
-                  <br />
-                  {address ? address : `${device.lat.toFixed(6)}, ${device.lon.toFixed(6)}`}
-                  <br />
-                  Flooded: {device.flooded ? 'Yes' : 'No'}
-                  <br />
-                  Bin Full: {device.binFull ? 'Yes' : 'No'}
-                  <br />
-                  Active: {device.active ? 'Yes' : 'No'}
+                  {/* ─── Popup styled to match Dashboard ─── */}
+                  <div style={{ minWidth: '180px', fontSize: '0.875rem', lineHeight: '1.7' }}>
+                    <div style={{ fontWeight: 700, marginBottom: '6px', fontSize: '1rem' }}>
+                      {device.name || device.id}
+                    </div>
+                    <div style={{ marginBottom: '6px', color: '#94A3B8', fontSize: '0.78rem' }}>
+                      {deviceAddresses[device.id]
+                        ? deviceAddresses[device.id]
+                        : `${device.lat.toFixed(6)}, ${device.lon.toFixed(6)}`}
+                    </div>
+                    <div>🌊 Flooded: <strong>{device.flooded ? 'Yes' : 'No'}</strong></div>
+                    <div>⚠️ Bin Full: <strong>{device.binFull ? 'Yes' : 'No'}</strong></div>
+                    <div>📶 Active: <strong>{device.active ? 'Yes' : 'No'}</strong></div>
+                    {device.fillPct != null && (
+                      <div>🗑️ Fill: <strong>{device.fillPct}%</strong></div>
+                    )}
+                    <div style={{ marginTop: '6px', color: '#64748B', fontSize: '0.75rem' }}>
+                      Last seen: {device.lastSeen ? new Date(device.lastSeen).toLocaleString() : '—'}
+                    </div>
+                  </div>
                 </Popup>
               </Marker>
             );
@@ -286,8 +266,7 @@ export default function Locations() {
                 key={device.id}
                 style={{
                   ...styles.listItem,
-                  backgroundColor:
-                    device.id === selectedDeviceId ? '#EEF2F7' : 'white',
+                  backgroundColor: device.id === selectedDeviceId ? '#EEF2F7' : 'white',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
@@ -312,6 +291,7 @@ export default function Locations() {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = {
   container: {
     padding: '20px',
