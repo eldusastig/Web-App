@@ -18,9 +18,11 @@ import { FiMapPin } from 'react-icons/fi';
 import { DeviceContext } from '../DeviceContext';
 import { LocationContext } from '../LocationContext';
 
-// ─── Inject dark popup + map styles to match Dashboard ───────────────────────
+// ─── Inject fonts + dark popup + map styles ──────────────────────────────────
 const locationPopupFix = document.createElement('style');
 locationPopupFix.textContent = `
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+
   .leaflet-popup { z-index: 1000 !important; }
   .leaflet-popup-content-wrapper {
     background: #1E293B !important;
@@ -367,6 +369,7 @@ const s = {
     backgroundColor: '#0F1B34',
     minHeight: '100%',
     color: '#E2E8F0',
+    fontFamily: "'DM Sans', sans-serif",
   },
   header: {
     display: 'flex',
@@ -515,6 +518,7 @@ const s = {
     textOverflow: 'ellipsis',
     maxWidth: '220px',
     marginTop: '1px',
+    fontFamily: "'DM Mono', monospace",
   },
   viewBtn: {
     backgroundColor: '#1D4ED8',
