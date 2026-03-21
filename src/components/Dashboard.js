@@ -1,5 +1,5 @@
 // src/components/Dashboard.jsx
-import React, { useContext, useMemo, useEffect, useRef } from 'react';
+import React, { useContext, useMemo, useEffect, useRef, useState } from 'react';
 import { FiTrash2, FiPlusCircle, FiWifi } from 'react-icons/fi';
 import { StyleSheet, css } from 'aphrodite';
 import { LocationContext } from '../LocationContext';
@@ -20,6 +20,35 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadowUrl,
 });
 // --- end leaflet fixes ---
+
+// ✅ Fix: ensure Leaflet popups always render above everything else
+// Aphrodite can sometimes stomp Leaflet's z-index — this guarantees popup visibility
+const leafletPopupFix = document.createElement('style');
+leafletPopupFix.textContent = `
+  .leaflet-popup { z-index: 1000 !important; }
+  .leaflet-popup-content-wrapper {
+    background: #1E293B !important;
+    color: #E2E8F0 !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
+  }
+  .leaflet-popup-tip {
+    background: #1E293B !important;
+  }
+  .leaflet-popup-content {
+    margin: 12px 16px !important;
+    font-size: 0.875rem !important;
+    line-height: 1.6 !important;
+  }
+  .leaflet-container a.leaflet-popup-close-button {
+    color: #94A3B8 !important;
+  }
+`;
+if (!document.getElementById('leaflet-popup-fix')) {
+  leafletPopupFix.id = 'leaflet-popup-fix';
+  document.head.appendChild(leafletPopupFix);
+}
 
 // ─── Inner component: pans map when first device coords arrive ───────────────
 // This lives INSIDE MapContainer so it has access to the map instance.
@@ -42,12 +71,23 @@ const MapAutoCenter = ({ devicesWithCoords }) => {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 const Dashboard = () => {
-  const { fullBinAlerts, floodRisks, activeDevices } = useContext(MetricsContext);
+  const { fullBinAlerts, floodRisks, activeDevices, devices } = useContext(MetricsContext);
   const { locations } = useContext(LocationContext) || { locations: [] };
+
+  // address cache: id -> address string
+  const [deviceAddresses, setDeviceAddresses] = useState({});
+  const fetchQueueRef = useRef(new Map());
 
   const displayValue = (val) => (val === null ? 'Loading…' : val);
 
-  // Filter + normalize coords — stable shape for markers
+  // quick lookup of live device metadata (online, name, etc.) by id
+  const metaById = useMemo(() => {
+    const m = new Map();
+    (devices || []).forEach((d) => { if (d && d.id) m.set(String(d.id), d); });
+    return m;
+  }, [devices]);
+
+  // Filter + normalize coords and merge with MetricsContext metadata
   const devicesWithCoords = useMemo(() => {
     return (locations || []).filter((d) => {
       const lat = Number(d.lat);
@@ -56,8 +96,49 @@ const Dashboard = () => {
       if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return false;
       if (lat === 0 && lon === 0) return false;
       return true;
-    }).map(d => ({ ...d, lat: Number(d.lat), lon: Number(d.lon) }));
-  }, [locations]);
+    }).map(d => {
+      const meta = metaById.get(String(d.id)) || {};
+      return {
+        ...d,
+        lat: Number(d.lat),
+        lon: Number(d.lon),
+        name: meta.name ?? meta.label ?? d.id,
+        flooded: meta.flooded ?? d.flooded ?? false,
+        binFull: meta.binFull ?? d.binFull ?? false,
+        fillPct: meta.fillPct ?? d.fillPct ?? null,
+        active: meta.online ?? meta.active ?? true,
+      };
+    });
+  }, [locations, metaById]);
+
+  // Reverse geocode each visible device — same pattern as Locations.jsx
+  useEffect(() => {
+    devicesWithCoords.forEach((device, idx) => {
+      const { id, lat, lon } = device;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      if (deviceAddresses[id]) return;
+      if (fetchQueueRef.current.get(id)) return;
+
+      fetchQueueRef.current.set(id, true);
+      const delayMs = Math.min(2000, idx * 300);
+      setTimeout(async () => {
+        try {
+          const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+          const res = await fetch(url, { headers: { Accept: 'application/json' } });
+          if (!res.ok) {
+            setDeviceAddresses(prev => ({ ...prev, [id]: 'No address (HTTP ' + res.status + ')' }));
+          } else {
+            const data = await res.json();
+            setDeviceAddresses(prev => ({ ...prev, [id]: data.display_name || 'Unknown location' }));
+          }
+        } catch (err) {
+          setDeviceAddresses(prev => ({ ...prev, [id]: 'No address found' }));
+        } finally {
+          fetchQueueRef.current.delete(id);
+        }
+      }, delayMs);
+    });
+  }, [devicesWithCoords, deviceAddresses]);
 
   return (
     <div className={css(styles.dashboardContainer)}>
@@ -102,16 +183,25 @@ const Dashboard = () => {
             {devicesWithCoords.map((d) => (
               <Marker key={d.id} position={[d.lat, d.lon]}>
                 <Popup>
-                  <b>{d.id}</b>
-                  <br />
-                  Last seen: {d.lastSeen ? new Date(d.lastSeen).toLocaleString() : '—'}
-                  <br />
-                  Address: {d.address ?? '—'}
-                  <br />
-                  Fill: {d.fillPct != null ? `${d.fillPct}%` : '—'}
-                  <br />
-                  {d.flooded && <span style={{ color: '#3B82F6' }}>🌊 Flood Risk</span>}
-                  {d.binFull && <span style={{ color: '#F59E0B' }}>⚠️ Bin Full</span>}
+                  <div style={{ minWidth: '180px', fontSize: '0.875rem', lineHeight: '1.7' }}>
+                    <div style={{ fontWeight: 700, marginBottom: '6px', fontSize: '1rem' }}>
+                      {d.name || d.id}
+                    </div>
+                    <div style={{ marginBottom: '6px', color: '#94A3B8', fontSize: '0.78rem' }}>
+                      {deviceAddresses[d.id]
+                        ? deviceAddresses[d.id]
+                        : `${d.lat.toFixed(6)}, ${d.lon.toFixed(6)}`}
+                    </div>
+                    <div>🌊 Flooded: <strong>{d.flooded ? 'Yes' : 'No'}</strong></div>
+                    <div>⚠️ Bin Full: <strong>{d.binFull ? 'Yes' : 'No'}</strong></div>
+                    <div>📶 Active: <strong>{d.active ? 'Yes' : 'No'}</strong></div>
+                    {d.fillPct != null && (
+                      <div>🗑️ Fill: <strong>{d.fillPct}%</strong></div>
+                    )}
+                    <div style={{ marginTop: '6px', color: '#64748B', fontSize: '0.75rem' }}>
+                      Last seen: {d.lastSeen ? new Date(d.lastSeen).toLocaleString() : '—'}
+                    </div>
+                  </div>
                 </Popup>
               </Marker>
             ))}
@@ -207,6 +297,8 @@ const styles = StyleSheet.create({
     padding: '24px',
     borderRadius: '12px',
     color: 'white',
+    // ✅ allow Leaflet popups to render outside the card boundary
+    overflow: 'visible',
   },
   sidePanel: {
     display: 'flex',
