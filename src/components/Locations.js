@@ -14,521 +14,460 @@ import {
   useMapEvents,
 } from 'react-leaflet';
 import L from 'leaflet';
-import { FiMapPin } from 'react-icons/fi';
+import { FiMapPin, FiWifi, FiAlertTriangle, FiDroplet } from 'react-icons/fi';
+import { StyleSheet, css } from 'aphrodite';
 import { DeviceContext } from '../DeviceContext';
 import { LocationContext } from '../LocationContext';
 
-// ─── Inject fonts + dark popup + map styles ──────────────────────────────────
-const locationPopupFix = document.createElement('style');
-locationPopupFix.textContent = `
+// ─── Inject Leaflet popup styles + font (matches Dashboard/Status) ────────────
+const _style = document.createElement('style');
+_style.textContent = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 
   .leaflet-popup { z-index: 1000 !important; }
   .leaflet-popup-content-wrapper {
     background: #1E293B !important;
     color: #E2E8F0 !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 8px !important;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6) !important;
+    font-family: 'DM Sans', sans-serif !important;
   }
   .leaflet-popup-tip { background: #1E293B !important; }
   .leaflet-popup-content {
-    margin: 12px 16px !important;
+    margin: 14px 16px !important;
     font-size: 0.875rem !important;
     line-height: 1.6 !important;
   }
-  .leaflet-container a.leaflet-popup-close-button { color: #94A3B8 !important; }
-  .leaflet-tile-pane { filter: brightness(0.85) saturate(0.9); }
-  .leaflet-marker-green  { filter: hue-rotate(100deg) saturate(2); }
-  .leaflet-marker-orange { filter: hue-rotate(20deg) saturate(3) brightness(1.1); }
-  .leaflet-marker-red    { filter: hue-rotate(-30deg) saturate(3) brightness(0.95); }
-  .leaflet-marker-gray   { filter: grayscale(1) brightness(0.7); }
-  .loc-device-item:hover { background: #273549 !important; }
+  .leaflet-container a.leaflet-popup-close-button {
+    color: #64748B !important;
+    font-size: 18px !important;
+    top: 8px !important;
+    right: 10px !important;
+  }
+  .leaflet-tile-pane { filter: brightness(0.82) saturate(0.85); }
+
+  /* marker color tints */
+  .loc-pin-green  { filter: hue-rotate(100deg) saturate(2); }
+  .loc-pin-orange { filter: hue-rotate(20deg) saturate(3) brightness(1.1); }
+  .loc-pin-red    { filter: hue-rotate(-30deg) saturate(3) brightness(0.95); }
+  .loc-pin-gray   { filter: grayscale(1) brightness(0.6); }
+
+  /* device list hover */
+  .loc-row:hover { background: #1a2b3e !important; }
 `;
-if (!document.getElementById('location-popup-fix')) {
-  locationPopupFix.id = 'location-popup-fix';
-  document.head.appendChild(locationPopupFix);
-}
+if (!document.getElementById('loc-styles')) { _style.id = 'loc-styles'; document.head.appendChild(_style); }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
-const makeIcon = (className) => new L.Icon({
+const makeIcon = (cls) => new L.Icon({
   iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
   iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-  shadowSize: [41, 41], className,
+  shadowSize: [41, 41], className: cls,
 });
-const greenIcon  = makeIcon('leaflet-marker-green');
-const orangeIcon = makeIcon('leaflet-marker-orange');
-const redIcon    = makeIcon('leaflet-marker-red');
-const grayIcon   = makeIcon('leaflet-marker-gray');
+const icons = {
+  green:  makeIcon('loc-pin-green'),
+  orange: makeIcon('loc-pin-orange'),
+  red:    makeIcon('loc-pin-red'),
+  gray:   makeIcon('loc-pin-gray'),
+};
 
-// ─── PanToDevice ──────────────────────────────────────────────────────────────
-function PanToDevice({ selectedDeviceId, devicesToShow, userMovedMap }) {
+// ─── PanToDevice (inside MapContainer) ───────────────────────────────────────
+function PanToDevice({ selectedId, devices, userMoved }) {
   const map = useMapEvents({
-    dragstart: () => (userMovedMap.current = true),
-    zoomstart: () => (userMovedMap.current = true),
+    dragstart: () => (userMoved.current = true),
+    zoomstart: () => (userMoved.current = true),
   });
   useEffect(() => {
-    if (!selectedDeviceId || userMovedMap.current || !map) return;
-    const device = devicesToShow.find((d) => d.id === selectedDeviceId);
-    if (device && typeof device.lat === 'number' && typeof device.lon === 'number') {
-      map.setView([device.lat, device.lon], 15, { animate: true });
-    }
-  }, [selectedDeviceId, devicesToShow, map]);
+    if (!selectedId || userMoved.current) return;
+    const d = devices.find((x) => x.id === selectedId);
+    if (d) map.setView([d.lat, d.lon], 15, { animate: true });
+  }, [selectedId, devices, map]);
   return null;
 }
 
-// ─── StatusBadge ─────────────────────────────────────────────────────────────
-const StatusBadge = ({ label, active, activeColor = '#22C55E' }) => (
-  <span style={{
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '4px',
-    padding: '2px 8px',
-    borderRadius: '999px',
-    fontSize: '0.72rem',
-    fontWeight: 600,
-    letterSpacing: '0.03em',
-    backgroundColor: active ? `${activeColor}22` : 'rgba(255,255,255,0.05)',
-    color: active ? activeColor : '#64748B',
-    border: `1px solid ${active ? `${activeColor}55` : 'rgba(255,255,255,0.08)'}`,
+// ─── Locations ────────────────────────────────────────────────────────────────
+export default function Locations() {
+  const { devices }   = useContext(DeviceContext);
+  const { locations } = useContext(LocationContext);
+
+  const [selectedId,      setSelectedId]      = useState(null);
+  const [addresses,       setAddresses]        = useState({});
+  const [showFlooded,     setShowFlooded]      = useState(false);
+  const [showBinFull,     setShowBinFull]      = useState(false);
+  const [showInactive,    setShowInactive]     = useState(false);
+  const userMoved   = useRef(false);
+  const fetchQueue  = useRef(new Map());
+
+  // ─── merge location coords + device metadata ────────────────────────────
+  const metaById = useMemo(() => {
+    const m = new Map();
+    (devices || []).forEach((d) => { if (d?.id) m.set(String(d.id), d); });
+    return m;
+  }, [devices]);
+
+  const merged = useMemo(() => (locations || []).map((loc) => {
+    const id   = String(loc.id);
+    const meta = metaById.get(id) || {};
+    return {
+      id,
+      lat:      Number(loc.lat),
+      lon:      Number(loc.lon),
+      lastSeen: loc.lastSeen || null,
+      flooded:  meta.flooded  ?? meta.flood    ?? false,
+      binFull:  meta.binFull  ?? meta.bin_full ?? (meta.fillPct ? Number(meta.fillPct) >= 90 : false),
+      active:   meta.active   ?? meta.online   ?? true,
+      name:     meta.name     ?? meta.label    ?? id,
+    };
+  }), [locations, metaById, devices]);
+
+  // ─── filter logic ────────────────────────────────────────────────────────
+  const visible = useMemo(() => merged.filter((d) => {
+    if (showInactive && !showFlooded && !showBinFull) return !d.active;
+    if (!showInactive && !d.active) return false;
+    if (!showFlooded && !showBinFull) return true;
+    if (showFlooded && d.flooded)  return true;
+    if (showBinFull && d.binFull)  return true;
+    return false;
+  }), [merged, showFlooded, showBinFull, showInactive]);
+
+  // ─── reverse geocode (staggered, cached) ────────────────────────────────
+  useEffect(() => {
+    visible.forEach((d, idx) => {
+      if (!Number.isFinite(d.lat) || !Number.isFinite(d.lon)) return;
+      if (addresses[d.id] || fetchQueue.current.get(d.id)) return;
+      fetchQueue.current.set(d.id, true);
+      setTimeout(async () => {
+        try {
+          const res  = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${d.lat}&lon=${d.lon}`,
+            { headers: { Accept: 'application/json' } }
+          );
+          const data = res.ok ? await res.json() : null;
+          setAddresses(p => ({ ...p, [d.id]: data?.display_name || 'Unknown location' }));
+        } catch {
+          setAddresses(p => ({ ...p, [d.id]: 'Address unavailable' }));
+        } finally {
+          fetchQueue.current.delete(d.id);
+        }
+      }, Math.min(2000, idx * 300));
+    });
+  }, [visible, addresses]);
+
+  const initialCenter = useMemo(() =>
+    visible.length > 0 ? [visible[0].lat, visible[0].lon] : [0, 0],
+  [visible]);
+  const initialZoom = visible.length > 0 ? 15 : 2;
+
+  // summary counts
+  const counts = useMemo(() => ({
+    active:   merged.filter(d => d.active).length,
+    inactive: merged.filter(d => !d.active).length,
+    flooded:  merged.filter(d => d.flooded).length,
+    binFull:  merged.filter(d => d.binFull).length,
+  }), [merged]);
+
+  const anyFilter = showFlooded || showBinFull || showInactive;
+
+  return (
+    <div className={css(s.page)}>
+
+      {/* ─── Header ───────────────────────────────────────────────────────── */}
+      <div className={css(s.header)}>
+        <div className={css(s.headerLeft)}>
+          <FiMapPin className={css(s.headerIcon)} />
+          <h2 className={css(s.headerTitle)}>Device Locations</h2>
+          <span className={css(s.headerBadge)}>{merged.length} device{merged.length !== 1 ? 's' : ''}</span>
+        </div>
+
+        {/* summary pills — same style as Status widgets */}
+        <div className={css(s.summaryRow)}>
+          <SummaryPill icon={<FiWifi />}          label={`${counts.active} Active`}   color="#10B981" active={counts.active > 0} />
+          <SummaryPill icon={<FiWifi />}           label={`${counts.inactive} Offline`} color="#64748B" active={counts.inactive > 0} />
+          <SummaryPill icon={<FiDroplet />}        label={`${counts.flooded} Flooded`}  color="#3B82F6" active={counts.flooded > 0} />
+          <SummaryPill icon={<FiAlertTriangle />}  label={`${counts.binFull} Bin Full`} color="#F59E0B" active={counts.binFull > 0} />
+        </div>
+      </div>
+
+      {/* ─── Filter Bar (same style as Status filter chips) ───────────────── */}
+      <div className={css(s.filterBar)}>
+        <span className={css(s.filterLabel)}>Filter:</span>
+        <FilterChip label="Flooded"  icon="🌊" checked={showFlooded}  color="#3B82F6" onChange={setShowFlooded} />
+        <FilterChip label="Bin Full" icon="⚠️" checked={showBinFull}  color="#F59E0B" onChange={setShowBinFull} />
+        <FilterChip label="Inactive" icon="🔌" checked={showInactive} color="#64748B" onChange={setShowInactive} />
+        {anyFilter && (
+          <button
+            className={css(s.clearBtn)}
+            onClick={() => { setShowFlooded(false); setShowBinFull(false); setShowInactive(false); }}
+          >
+            ✕ Clear
+          </button>
+        )}
+        {anyFilter && (
+          <span className={css(s.filterInfo)}>
+            Showing {visible.length} of {merged.length} devices
+          </span>
+        )}
+      </div>
+
+      {/* ─── Map Card ─────────────────────────────────────────────────────── */}
+      <div className={css(s.card, s.mapCard)}>
+        <MapContainer
+          center={initialCenter}
+          zoom={initialZoom}
+          scrollWheelZoom
+          style={{ height: '420px', width: '100%' }}
+          whenCreated={() => { userMoved.current = false; }}
+        >
+          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+
+          {visible.map((d) => (
+            <Marker
+              key={d.id}
+              position={[d.lat, d.lon]}
+              icon={d.flooded ? icons.red : d.binFull ? icons.orange : d.active ? icons.green : icons.gray}
+              eventHandlers={{ click: () => setSelectedId(d.id) }}
+            >
+              <Popup>
+                <div style={{ minWidth: '190px', fontFamily: "'DM Sans', sans-serif" }}>
+                  <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '6px', color: '#F1F5F9' }}>
+                    {d.name || d.id}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#64748B', marginBottom: '10px', fontFamily: "'DM Mono', monospace" }}>
+                    {addresses[d.id] || `${d.lat.toFixed(6)}, ${d.lon.toFixed(6)}`}
+                  </div>
+                  <PopupRow label="🌊 Flooded"  value={d.flooded ? 'Yes' : 'No'} alert={d.flooded} />
+                  <PopupRow label="⚠️ Bin Full" value={d.binFull ? 'Yes' : 'No'} alert={d.binFull} />
+                  <PopupRow label="📶 Active"   value={d.active  ? 'Yes' : 'No'} ok={d.active} />
+                  <div style={{ marginTop: '8px', fontSize: '0.72rem', color: '#475569', fontFamily: "'DM Mono', monospace" }}>
+                    Last seen: {d.lastSeen ? new Date(d.lastSeen).toLocaleString() : '—'}
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+
+          <PanToDevice selectedId={selectedId} devices={visible} userMoved={userMoved} />
+        </MapContainer>
+      </div>
+
+      {/* ─── Device List (styled like Status table) ───────────────────────── */}
+      <div className={css(s.card)}>
+        <div className={css(s.listHeader)}>
+          <strong>Connected Devices</strong>
+          <span className={css(s.listCount)}>{visible.length} shown</span>
+        </div>
+
+        {visible.length === 0 ? (
+          <div className={css(s.noData)}>No devices match the current filters.</div>
+        ) : (
+          <div className={css(s.listScroll)}>
+            <table className={css(s.table)}>
+              <thead>
+                <tr>
+                  <th className={css(s.th)}>Device</th>
+                  <th className={css(s.th)}>Address</th>
+                  <th className={css(s.th)}>Flooded</th>
+                  <th className={css(s.th)}>Bin Full</th>
+                  <th className={css(s.th)}>Active</th>
+                  <th className={css(s.th)}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((d) => (
+                  <tr
+                    key={d.id}
+                    className="loc-row"
+                    style={{
+                      backgroundColor: d.id === selectedId ? '#1a2d4a' : 'transparent',
+                      borderLeft: d.id === selectedId ? '3px solid #3B82F6' : '3px solid transparent',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => setSelectedId(d.id)}
+                  >
+                    <td className={css(s.td)}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{
+                          width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0,
+                          backgroundColor: d.flooded ? '#3B82F6' : d.binFull ? '#F59E0B' : d.active ? '#10B981' : '#475569',
+                          boxShadow: d.active ? `0 0 5px ${d.flooded ? '#3B82F6' : d.binFull ? '#F59E0B' : '#10B981'}` : 'none',
+                        }} />
+                        <span style={{ fontWeight: 600, color: '#F1F5F9' }}>{d.name || d.id}</span>
+                      </div>
+                    </td>
+                    <td className={css(s.td, s.tdMono)}>
+                      {addresses[d.id]
+                        ? addresses[d.id].split(',').slice(0, 2).join(',')
+                        : `${d.lat.toFixed(4)}, ${d.lon.toFixed(4)}`}
+                    </td>
+                    <td className={css(s.td, d.flooded  ? s.alert : s.ok)}>{d.flooded  ? 'Yes' : 'No'}</td>
+                    <td className={css(s.td, d.binFull  ? s.alert : s.ok)}>{d.binFull  ? 'Yes' : 'No'}</td>
+                    <td className={css(s.td, d.active   ? s.ok    : s.alert)}>{d.active ? 'Yes' : 'No'}</td>
+                    <td className={css(s.td)}>
+                      <button
+                        className={css(s.viewBtn)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          userMoved.current = false;
+                          setSelectedId(d.id);
+                        }}
+                      >
+                        📍 View
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+    </div>
+  );
+}
+
+// ─── Small reusable components ────────────────────────────────────────────────
+
+const SummaryPill = ({ icon, label, color, active }) => (
+  <div style={{
+    display: 'inline-flex', alignItems: 'center', gap: '5px',
+    padding: '4px 10px', borderRadius: '999px', fontSize: '0.78rem', fontWeight: 600,
+    backgroundColor: active ? `${color}18` : 'rgba(255,255,255,0.04)',
+    color: active ? color : '#475569',
+    border: `1px solid ${active ? `${color}44` : 'rgba(255,255,255,0.06)'}`,
+    fontFamily: "'DM Sans', sans-serif",
   }}>
-    {label}
-  </span>
+    {icon} {label}
+  </div>
 );
 
-// ─── FilterChip ──────────────────────────────────────────────────────────────
-const FilterChip = ({ label, checked, onChange, color, icon }) => (
+const FilterChip = ({ label, icon, checked, color, onChange }) => (
   <button
     onClick={() => onChange(!checked)}
     style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '6px',
-      padding: '6px 14px',
-      borderRadius: '999px',
-      fontSize: '0.8rem',
-      fontWeight: 600,
-      cursor: 'pointer',
+      display: 'inline-flex', alignItems: 'center', gap: '5px',
+      padding: '6px 14px', borderRadius: '999px',
+      fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
       border: `1px solid ${checked ? color : 'rgba(255,255,255,0.1)'}`,
       backgroundColor: checked ? `${color}22` : 'rgba(255,255,255,0.04)',
       color: checked ? color : '#94A3B8',
-      transition: 'all 0.15s ease',
-      outline: 'none',
+      transition: 'all 0.15s ease', outline: 'none',
+      fontFamily: "'DM Sans', sans-serif",
     }}
   >
     {icon} {label}
   </button>
 );
 
-// ─── Locations ────────────────────────────────────────────────────────────────
-export default function Locations() {
-  const { devices } = useContext(DeviceContext);
-  const { locations } = useContext(LocationContext);
-  const [selectedDeviceId, setSelectedDeviceId] = useState(null);
-  const [deviceAddresses, setDeviceAddresses] = useState({});
-  const [showFlooded, setShowFlooded] = useState(false);
-  const [showBinFull, setShowBinFull] = useState(false);
-  const [showInactive, setShowInactive] = useState(false);
-  const userMovedMap = useRef(false);
-  const fetchQueueRef = useRef(new Map());
+const PopupRow = ({ label, value, alert, ok }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+    <span style={{ color: '#94A3B8' }}>{label}</span>
+    <strong style={{ color: alert ? '#EF4444' : ok ? '#10B981' : '#E2E8F0' }}>{value}</strong>
+  </div>
+);
 
-  const metaById = useMemo(() => {
-    const m = new Map();
-    (devices || []).forEach((d) => { if (d && d.id) m.set(String(d.id), d); });
-    return m;
-  }, [devices]);
-
-  const mergedDevices = useMemo(() => {
-    return (locations || []).map((loc) => {
-      const id = String(loc.id);
-      const meta = metaById.get(id) || {};
-      return {
-        id,
-        lat: Number(loc.lat),
-        lon: Number(loc.lon),
-        lastSeen: loc.lastSeen || null,
-        flooded: meta.flooded ?? meta.flood ?? false,
-        binFull: meta.binFull ?? meta.bin_full ?? (meta.fillPct ? (Number(meta.fillPct) >= 90) : false),
-        active: meta.active ?? meta.online ?? true,
-        name: meta.name ?? meta.label ?? id,
-        rawMeta: meta,
-      };
-    });
-  }, [locations, metaById, devices]);
-
-  const devicesToShow = useMemo(() => {
-    return mergedDevices.filter((d) => {
-      if (showInactive && !showFlooded && !showBinFull) return !d.active;
-      if (!showInactive && !d.active) return false;
-      if (!showFlooded && !showBinFull) return true;
-      if (showFlooded && d.flooded) return true;
-      if (showBinFull && d.binFull) return true;
-      return false;
-    });
-  }, [mergedDevices, showFlooded, showBinFull, showInactive]);
-
-  // Reverse geocode
-  useEffect(() => {
-    devicesToShow.forEach((device, idx) => {
-      const { id, lat, lon } = device;
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-      if (deviceAddresses[id]) return;
-      if (fetchQueueRef.current.get(id)) return;
-      fetchQueueRef.current.set(id, true);
-      setTimeout(async () => {
-        try {
-          const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
-          const res = await fetch(url, { headers: { Accept: 'application/json' } });
-          const data = res.ok ? await res.json() : null;
-          setDeviceAddresses(prev => ({ ...prev, [id]: data?.display_name || 'Unknown location' }));
-        } catch {
-          setDeviceAddresses(prev => ({ ...prev, [id]: 'No address found' }));
-        } finally {
-          fetchQueueRef.current.delete(id);
-        }
-      }, Math.min(2000, idx * 300));
-    });
-  }, [devicesToShow, deviceAddresses]);
-
-  const initialCenter = useMemo(() => (
-    devicesToShow.length > 0 ? [devicesToShow[0].lat, devicesToShow[0].lon] : [0, 0]
-  ), [devicesToShow]);
-  const initialZoom = useMemo(() => (devicesToShow.length > 0 ? 15 : 2), [devicesToShow]);
-
-  // summary counts
-  const floodCount    = mergedDevices.filter(d => d.flooded).length;
-  const binFullCount  = mergedDevices.filter(d => d.binFull).length;
-  const activeCount   = mergedDevices.filter(d => d.active).length;
-  const inactiveCount = mergedDevices.filter(d => !d.active).length;
-
-  return (
-    <div style={s.page}>
-
-      {/* ─── Header ─────────────────────────────────────────────────────────── */}
-      <div style={s.header}>
-        <div style={s.headerLeft}>
-          <FiMapPin style={{ color: '#3B82F6', fontSize: '1.2rem' }} />
-          <span style={s.headerTitle}>Device Locations</span>
-          <span style={s.headerCount}>
-            {mergedDevices.length} device{mergedDevices.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-        <div style={s.summaryPills}>
-          <StatusBadge label={`${activeCount} Active`}    active={activeCount > 0}    activeColor="#22C55E" />
-          <StatusBadge label={`${inactiveCount} Offline`} active={inactiveCount > 0}  activeColor="#94A3B8" />
-          <StatusBadge label={`${floodCount} Flooded`}    active={floodCount > 0}     activeColor="#3B82F6" />
-          <StatusBadge label={`${binFullCount} Bin Full`} active={binFullCount > 0}   activeColor="#F59E0B" />
-        </div>
-      </div>
-
-      {/* ─── Filter Row ─────────────────────────────────────────────────────── */}
-      <div style={s.filterRow}>
-        <span style={s.filterLabel}>Filter:</span>
-        <FilterChip label="Flooded"  checked={showFlooded}  onChange={setShowFlooded}  color="#3B82F6" icon="🌊" />
-        <FilterChip label="Bin Full" checked={showBinFull}  onChange={setShowBinFull}  color="#F59E0B" icon="⚠️" />
-        <FilterChip label="Inactive" checked={showInactive} onChange={setShowInactive} color="#94A3B8" icon="🔌" />
-        {(showFlooded || showBinFull || showInactive) && (
-          <button
-            onClick={() => { setShowFlooded(false); setShowBinFull(false); setShowInactive(false); }}
-            style={s.clearBtn}
-          >
-            ✕ Clear
-          </button>
-        )}
-      </div>
-
-      {/* ─── Map ────────────────────────────────────────────────────────────── */}
-      <div style={s.mapCard}>
-        <MapContainer
-          center={initialCenter}
-          zoom={initialZoom}
-          scrollWheelZoom={true}
-          style={{ height: '420px', width: '100%', borderRadius: '10px' }}
-          whenCreated={() => { userMovedMap.current = false; }}
-        >
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-
-          {devicesToShow.map((device) => {
-            let iconToUse = greenIcon;
-            if (device.flooded)      iconToUse = redIcon;
-            else if (device.binFull) iconToUse = orangeIcon;
-            else if (!device.active) iconToUse = grayIcon;
-
-            return (
-              <Marker
-                key={device.id}
-                position={[device.lat, device.lon]}
-                icon={iconToUse}
-                eventHandlers={{ click: () => setSelectedDeviceId(device.id) }}
-              >
-                <Popup>
-                  <div style={{ minWidth: '190px', fontSize: '0.875rem', lineHeight: '1.7' }}>
-                    <div style={{ fontWeight: 700, marginBottom: '6px', fontSize: '1rem' }}>
-                      {device.name || device.id}
-                    </div>
-                    <div style={{ marginBottom: '8px', color: '#94A3B8', fontSize: '0.78rem' }}>
-                      {deviceAddresses[device.id] || `${device.lat.toFixed(6)}, ${device.lon.toFixed(6)}`}
-                    </div>
-                    <div>🌊 Flooded: <strong>{device.flooded ? 'Yes' : 'No'}</strong></div>
-                    <div>⚠️ Bin Full: <strong>{device.binFull ? 'Yes' : 'No'}</strong></div>
-                    <div>📶 Active: <strong>{device.active ? 'Yes' : 'No'}</strong></div>
-                    <div style={{ marginTop: '6px', color: '#64748B', fontSize: '0.75rem' }}>
-                      Last seen: {device.lastSeen ? new Date(device.lastSeen).toLocaleString() : '—'}
-                    </div>
-                  </div>
-                </Popup>
-              </Marker>
-            );
-          })}
-
-          <PanToDevice
-            selectedDeviceId={selectedDeviceId}
-            devicesToShow={devicesToShow}
-            userMovedMap={userMovedMap}
-          />
-        </MapContainer>
-      </div>
-
-      {/* ─── Device List ────────────────────────────────────────────────────── */}
-      <div style={s.listCard}>
-        <div style={s.listHeader}>
-          <span style={s.listTitle}>Connected Devices</span>
-          <span style={s.listSubtitle}>{devicesToShow.length} shown</span>
-        </div>
-
-        {devicesToShow.length === 0 ? (
-          <div style={s.emptyState}>
-            <FiMapPin style={{ fontSize: '2rem', color: '#334155', marginBottom: '8px' }} />
-            <p style={{ color: '#475569', margin: 0 }}>No devices match the current filters.</p>
-          </div>
-        ) : (
-          <div style={s.deviceGrid}>
-            {devicesToShow.map((device) => {
-              const isSelected = device.id === selectedDeviceId;
-              const dotColor = device.flooded ? '#3B82F6'
-                : device.binFull ? '#F59E0B'
-                : device.active  ? '#22C55E'
-                : '#475569';
-
-              return (
-                <div
-                  key={device.id}
-                  className="loc-device-item"
-                  style={{
-                    ...s.deviceCard,
-                    borderLeftColor: isSelected ? '#3B82F6' : 'transparent',
-                    backgroundColor: isSelected ? '#1a2d4a' : '#1E293B',
-                  }}
-                >
-                  {/* left: dot + name + address */}
-                  <div style={s.deviceCardLeft}>
-                    <span style={{
-                      width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0,
-                      backgroundColor: dotColor,
-                      boxShadow: device.active ? `0 0 6px ${dotColor}` : 'none',
-                    }} />
-                    <div style={{ minWidth: 0 }}>
-                      <div style={s.deviceName}>{device.name || device.id}</div>
-                      <div style={s.deviceAddress}>
-                        {deviceAddresses[device.id]
-                          ? deviceAddresses[device.id].split(',').slice(0, 2).join(',')
-                          : `${device.lat.toFixed(4)}, ${device.lon.toFixed(4)}`}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* right: status badges + view button */}
-                  <div style={s.deviceCardRight}>
-                    <div style={s.badgeRow}>
-                      {device.flooded  && <StatusBadge label="Flooded"  active activeColor="#3B82F6" />}
-                      {device.binFull  && <StatusBadge label="Bin Full" active activeColor="#F59E0B" />}
-                      {!device.active  && <StatusBadge label="Offline"  active activeColor="#94A3B8" />}
-                    </div>
-                    <button
-                      style={s.viewBtn}
-                      onClick={() => { userMovedMap.current = false; setSelectedDeviceId(device.id); }}
-                    >
-                      📍 View
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-const s = {
+// ─── Aphrodite styles (same tokens as Dashboard + Status) ─────────────────────
+const s = StyleSheet.create({
   page: {
+    flex: 1,
     padding: '24px',
-    backgroundColor: '#0F1B34',
-    minHeight: '100%',
-    color: '#E2E8F0',
+    backgroundColor: '#0F172A',   // matches Status.statusContainer
+    overflowY: 'auto',
     fontFamily: "'DM Sans', sans-serif",
+    color: '#E2E8F0',
+    boxSizing: 'border-box',
   },
+
+  // header
   header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: '12px',
-    marginBottom: '16px',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    flexWrap: 'wrap', gap: '12px', marginBottom: '16px',
   },
-  headerLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-  },
-  headerTitle: {
-    fontSize: '1.25rem',
-    fontWeight: 700,
-    color: '#F1F5F9',
-  },
-  headerCount: {
-    fontSize: '0.8rem',
-    color: '#64748B',
+  headerLeft: { display: 'flex', alignItems: 'center', gap: '10px' },
+  headerIcon: { color: '#3B82F6', fontSize: '1.2rem' },
+  headerTitle: { fontSize: '1.25rem', fontWeight: 700, color: '#F8FAFC', margin: 0 },
+  headerBadge: {
+    fontSize: '0.78rem', color: '#64748B',
     backgroundColor: 'rgba(255,255,255,0.06)',
-    padding: '2px 8px',
-    borderRadius: '999px',
+    padding: '2px 8px', borderRadius: '999px',
     border: '1px solid rgba(255,255,255,0.08)',
   },
-  summaryPills: {
-    display: 'flex',
-    gap: '8px',
-    flexWrap: 'wrap',
-  },
-  filterRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    flexWrap: 'wrap',
-    marginBottom: '16px',
-    padding: '12px 16px',
+  summaryRow: { display: 'flex', gap: '8px', flexWrap: 'wrap' },
+
+  // filter bar — matches Status filterInfo style
+  filterBar: {
+    display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+    marginBottom: '16px', padding: '12px 16px',
     backgroundColor: '#1E293B',
-    borderRadius: '10px',
+    borderRadius: '12px',
     border: '1px solid rgba(255,255,255,0.06)',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
   },
-  filterLabel: {
-    fontSize: '0.8rem',
-    color: '#64748B',
-    fontWeight: 600,
-    marginRight: '4px',
-  },
+  filterLabel: { fontSize: '0.8rem', color: '#64748B', fontWeight: 600 },
   clearBtn: {
-    marginLeft: '4px',
-    padding: '6px 12px',
-    borderRadius: '999px',
-    fontSize: '0.78rem',
-    fontWeight: 600,
-    cursor: 'pointer',
+    padding: '6px 12px', borderRadius: '999px',
+    fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
     border: '1px solid rgba(255,100,100,0.3)',
     backgroundColor: 'rgba(255,100,100,0.08)',
-    color: '#F87171',
-    transition: 'all 0.15s ease',
-    outline: 'none',
+    color: '#F87171', outline: 'none',
   },
-  mapCard: {
-    borderRadius: '12px',
-    overflow: 'hidden',
-    marginBottom: '20px',
-    border: '1px solid rgba(255,255,255,0.06)',
-    boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
-  },
-  listCard: {
+  filterInfo: { fontSize: '0.8rem', color: '#64748B', marginLeft: '4px' },
+
+  // cards — matches Status deviceHealth
+  card: {
     backgroundColor: '#1E293B',
     borderRadius: '12px',
-    border: '1px solid rgba(255,255,255,0.06)',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+    marginBottom: '20px',
     overflow: 'hidden',
   },
+  mapCard: { padding: 0 },   // map fills card edge-to-edge
+
+  // device list
   listHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '14px 20px',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '16px 20px',
     borderBottom: '1px solid rgba(255,255,255,0.06)',
+    fontSize: '1rem', fontWeight: 700, color: '#F8FAFC',
   },
-  listTitle: {
-    fontSize: '0.95rem',
-    fontWeight: 700,
-    color: '#F1F5F9',
+  listCount: { fontSize: '0.8rem', color: '#64748B' },
+  listScroll: { overflowX: 'auto', maxHeight: '320px', overflowY: 'auto' },
+  noData: { color: '#94A3B8', textAlign: 'center', padding: '24px' },
+
+  // table — matches Status deviceTable
+  table: {
+    width: '100%', borderCollapse: 'collapse',
+    fontSize: '0.9rem', color: '#F8FAFC', tableLayout: 'fixed',
   },
-  listSubtitle: {
-    fontSize: '0.78rem',
-    color: '#64748B',
+  th: {
+    padding: '10px 16px', textAlign: 'left',
+    fontSize: '0.78rem', fontWeight: 600, textTransform: 'uppercase',
+    color: '#64748B', letterSpacing: '0.05em',
+    borderBottom: '1px solid rgba(255,255,255,0.06)',
+    backgroundColor: '#1E293B',
+    position: 'sticky', top: 0, zIndex: 1,
   },
-  emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    padding: '40px 20px',
-  },
-  deviceGrid: {
-    display: 'flex',
-    flexDirection: 'column',
-    maxHeight: '280px',
-    overflowY: 'auto',
-  },
-  deviceCard: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '12px 20px',
+  td: {
+    padding: '12px 16px',
     borderBottom: '1px solid rgba(255,255,255,0.04)',
-    borderLeft: '3px solid transparent',
-    cursor: 'pointer',
-    transition: 'background 0.15s ease',
-    gap: '12px',
+    verticalAlign: 'middle',
   },
-  deviceCardLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    flex: 1,
-    minWidth: 0,
-  },
-  deviceCardRight: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    flexShrink: 0,
-  },
-  badgeRow: {
-    display: 'flex',
-    gap: '4px',
-  },
-  deviceName: {
-    fontSize: '0.875rem',
-    fontWeight: 600,
-    color: '#E2E8F0',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    maxWidth: '160px',
-  },
-  deviceAddress: {
-    fontSize: '0.72rem',
-    color: '#64748B',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    maxWidth: '220px',
-    marginTop: '1px',
+  tdMono: {
     fontFamily: "'DM Mono', monospace",
+    fontSize: '0.78rem', color: '#64748B',
   },
+
+  // status colors — identical to Status
+  alert: { color: '#EF4444', fontWeight: 'bold' },
+  ok:    { color: '#10B981', fontWeight: 'bold' },
+
   viewBtn: {
-    backgroundColor: '#1D4ED8',
-    color: 'white',
-    border: 'none',
-    padding: '5px 10px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontSize: '0.78rem',
-    fontWeight: 600,
+    backgroundColor: '#1D4ED8', color: 'white',
+    border: 'none', padding: '5px 10px',
+    borderRadius: '6px', cursor: 'pointer',
+    fontSize: '0.78rem', fontWeight: 600,
     whiteSpace: 'nowrap',
+    ':hover': { backgroundColor: '#2563EB' },
   },
-};
+});
