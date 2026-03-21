@@ -105,7 +105,6 @@ const Dashboard = () => {
         name: meta.name ?? meta.label ?? d.id,
         flooded: meta.flooded ?? d.flooded ?? false,
         binFull: meta.binFull ?? d.binFull ?? false,
-        fillPct: meta.fillPct ?? d.fillPct ?? null,
         active: meta.online ?? meta.active ?? true,
       };
     });
@@ -195,9 +194,6 @@ const Dashboard = () => {
                     <div>🌊 Flooded: <strong>{d.flooded ? 'Yes' : 'No'}</strong></div>
                     <div>⚠️ Bin Full: <strong>{d.binFull ? 'Yes' : 'No'}</strong></div>
                     <div>📶 Active: <strong>{d.active ? 'Yes' : 'No'}</strong></div>
-                    {d.fillPct != null && (
-                      <div>🗑️ Fill: <strong>{d.fillPct}%</strong></div>
-                    )}
                     <div style={{ marginTop: '6px', color: '#64748B', fontSize: '0.75rem' }}>
                       Last seen: {d.lastSeen ? new Date(d.lastSeen).toLocaleString() : '—'}
                     </div>
