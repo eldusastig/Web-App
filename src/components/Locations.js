@@ -270,7 +270,7 @@ const s = StyleSheet.create({
     fontFamily: "'DM Sans', sans-serif",
     color: '#E2E8F0',
     boxSizing: 'border-box',
-    marginLeft: '40px',
+    marginLeft: '30px',
   },
   title: {
     fontSize: '1.5rem',
