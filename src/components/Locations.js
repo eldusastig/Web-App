@@ -123,7 +123,6 @@ export default function Locations() {
         binFull: meta.binFull ?? meta.bin_full ?? (meta.fillPct ? (Number(meta.fillPct) >= 90) : false),
         active: meta.active ?? meta.online ?? true,
         name: meta.name ?? meta.label ?? id,
-        fillPct: meta.fillPct ?? loc.fillPct ?? null,
         rawMeta: meta,
       };
     });
@@ -235,9 +234,6 @@ export default function Locations() {
                     <div>🌊 Flooded: <strong>{device.flooded ? 'Yes' : 'No'}</strong></div>
                     <div>⚠️ Bin Full: <strong>{device.binFull ? 'Yes' : 'No'}</strong></div>
                     <div>📶 Active: <strong>{device.active ? 'Yes' : 'No'}</strong></div>
-                    {device.fillPct != null && (
-                      <div>🗑️ Fill: <strong>{device.fillPct}%</strong></div>
-                    )}
                     <div style={{ marginTop: '6px', color: '#64748B', fontSize: '0.75rem' }}>
                       Last seen: {device.lastSeen ? new Date(device.lastSeen).toLocaleString() : '—'}
                     </div>
