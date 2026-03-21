@@ -12,6 +12,9 @@ import { LocationContext } from '../LocationContext';
 const _style = document.createElement('style');
 _style.textContent = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+  .leaflet-container, .leaflet-popup-content-wrapper, .leaflet-popup-content {
+    font-family: 'DM Sans', sans-serif !important;
+  }
   .leaflet-popup-content-wrapper {
     background: #1E293B !important;
     color: #E2E8F0 !important;
@@ -148,7 +151,7 @@ export default function Locations() {
           center={initialCenter}
           zoom={visible.length > 0 ? 15 : 2}
           scrollWheelZoom
-          style={{ height: '420px', width: '100%' }}
+          style={{ height: '65vh', width: '100%' }}
           whenCreated={() => { userMoved.current = false; }}
         >
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
@@ -267,6 +270,7 @@ const s = StyleSheet.create({
     fontWeight: 700,
     color: '#F8FAFC',
     margin: '0 0 16px 0',
+    fontFamily: "'DM Sans', sans-serif",
   },
   filterRow: {
     display: 'flex',
@@ -293,6 +297,7 @@ const s = StyleSheet.create({
     fontSize: '0.95rem',
     color: '#F8FAFC',
     borderBottom: '1px solid rgba(255,255,255,0.06)',
+    fontFamily: "'DM Sans', sans-serif",
   },
   list: {
     listStyle: 'none',
@@ -325,6 +330,7 @@ const s = StyleSheet.create({
     fontWeight: 600,
     fontSize: '0.875rem',
     color: '#E2E8F0',
+    fontFamily: "'DM Sans', sans-serif",
   },
   empty: {
     color: '#475569',
