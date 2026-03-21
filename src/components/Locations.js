@@ -33,10 +33,10 @@ _style.textContent = `
   .leaflet-popup-content { margin: 14px 16px !important; font-size: 0.875rem !important; line-height: 1.6 !important; }
   .leaflet-container a.leaflet-popup-close-button { color: #64748B !important; }
   .leaflet-tile-pane { filter: brightness(0.82) saturate(0.85); }
-  .loc-pin-green  { filter: hue-rotate(100deg) saturate(2); }
-  .loc-pin-orange { filter: hue-rotate(20deg) saturate(3) brightness(1.1); }
-  .loc-pin-red    { filter: hue-rotate(-30deg) saturate(3); }
-  .loc-pin-gray   { filter: grayscale(1) brightness(0.6); }
+  .loc-pin-green  { filter: hue-rotate(200deg) saturate(3) brightness(1.1); }
+  .loc-pin-orange { filter: hue-rotate(200deg) saturate(3) brightness(1.1); }
+  .loc-pin-red    { filter: hue-rotate(200deg) saturate(3) brightness(1.1); }
+  .loc-pin-gray   { filter: hue-rotate(200deg) saturate(3) brightness(1.1); }
 `;
 if (!document.getElementById('loc-styles')) { _style.id = 'loc-styles'; document.head.appendChild(_style); }
 
