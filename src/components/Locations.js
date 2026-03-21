@@ -12,6 +12,12 @@ import { LocationContext } from '../LocationContext';
 const _style = document.createElement('style');
 _style.textContent = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+
+  /* Force DM Sans on everything inside the locations page */
+  #loc-root, #loc-root * {
+    font-family: 'DM Sans', sans-serif !important;
+  }
+
   .leaflet-container, .leaflet-popup-content-wrapper, .leaflet-popup-content {
     font-family: 'DM Sans', sans-serif !important;
   }
@@ -133,7 +139,7 @@ export default function Locations() {
   , [visible]);
 
   return (
-    <div className={css(s.page)}>
+    <div id="loc-root" className={css(s.page)}>
 
       {/* ─── Header ─────────────────────────────────────────────────────── */}
       <h2 className={css(s.title)}>Device Locations</h2>
@@ -151,7 +157,7 @@ export default function Locations() {
           center={initialCenter}
           zoom={visible.length > 0 ? 15 : 2}
           scrollWheelZoom
-          style={{ height: '65vh', width: '100%' }}
+          style={{ height: '70vh', width: '100%' }}
           whenCreated={() => { userMoved.current = false; }}
         >
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
@@ -266,7 +272,7 @@ const s = StyleSheet.create({
     boxSizing: 'border-box',
   },
   title: {
-    fontSize: '1.25rem',
+    fontSize: '1.5rem',
     fontWeight: 700,
     color: '#F8FAFC',
     margin: '0 0 16px 0',
