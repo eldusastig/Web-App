@@ -878,38 +878,36 @@ export default function Status() {
 
                               {renderManualForm(d.id)}
 
-                              {loadingLogs[d.id] ? (
-                                <div className={css(styles.loading)}>Loading logs…</div>
-                              ) : errorLogs[d.id] ? (
-                                <div className={css(styles.error)}>Error: {errorLogs[d.id]}</div>
-                              ) : deviceLogs.length > 0 ? (
-                                <div className={css(styles.logsList)}>
-                                  {deviceLogs.map((l, i) => renderLogItem(l, i, d))}
-                                </div>
-                              <div className={css(styles.logsList)}>
-                              {deviceLogs.length > 0 ? (
-                              deviceLogs.map((l, i) => renderLogItem(l, i, d))
-                            ) : (
-                              renderLogItem({
-                                ts: null,
+                                                    {loadingLogs[d.id] ? (
+                        <div className={css(styles.loading)}>Loading logs…</div>
+                      ) : errorLogs[d.id] ? (
+                        <div className={css(styles.error)}>Error: {errorLogs[d.id]}</div>
+                      ) : (
+                        <div className={css(styles.logsList)}>
+                          {deviceLogs.length > 0 ? (
+                            deviceLogs.map((l, i) => renderLogItem(l, i, d))
+                          ) : (
+                            renderLogItem({
+                              ts: null,
+                              classes: 'Rubbish Detected',
+                              arrival: Date.now(),
+                              raw: {
+                                _manualEntry: true,
+                                _manualLabel: 'Rubbish Detected',
+                                _displayTs: buildDisplayTs(MANUAL_DEFAULT_DATE, MANUAL_DEFAULT_TIME),
+                                _detectionTopic: true,
                                 classes: 'Rubbish Detected',
-                                arrival: Date.now(),
-                                raw: {
-                                  _manualEntry: true,
-                                  _manualLabel: 'Rubbish Detected',
-                                  _displayTs: buildDisplayTs(MANUAL_DEFAULT_DATE, MANUAL_DEFAULT_TIME),
-                                  _detectionTopic: true,
-                                  classes: 'Rubbish Detected',
-                                },
-                              }, 0, d)
-                                )}
-                            </div>
-                          </td>
-                        </tr>
+                              },
+                            }, 0, d)
+                          )}
+                        </div>
                       )}
-                    </React.Fragment>
-                  );
-                })}
+                      </td>
+                      </tr>
+                      )}
+                      </React.Fragment>
+                      );
+                      })}
 
                 {devices.length === 0 && (
                   <tr><td colSpan="6" className={css(styles.noData)}>No devices connected yet</td></tr>
