@@ -441,21 +441,17 @@ export default function Status() {
     loadLogsForDevice(d);
   };
 
-  const renderLogItem = (log, idx, device) => {
-    if (!log) return null;
-    const tsStr = formatLogTimestamp(log, device) || '—';
-    const classesLabel = getClassLabel(log);
-    const isManual = log.raw && log.raw._manualEntry;
-    return (
-      <div key={idx} className={css(styles.logItem, isManual ? styles.logItemManual : null)}>
-        <div className={css(styles.logTimestamp)}>
-          {tsStr}
-          {isManual && <span className={css(styles.manualBadge)}>manual</span>}
-        </div>
-        <div className={css(styles.logClasses)}>{classesLabel}</div>
-      </div>
-    );
-  };
+const renderLogItem = (log, idx, device) => {
+  if (!log) return null;
+  const tsStr = formatLogTimestamp(log, device) || '—';
+  const classesLabel = getClassLabel(log);
+  return (
+    <div key={idx} className={css(styles.logItem)}>
+      <div className={css(styles.logTimestamp)}>{tsStr}</div>
+      <div className={css(styles.logClasses)}>{classesLabel}</div>
+    </div>
+  );
+};
 
   const renderManualForm = (deviceId) => {
     if (manualFormOpen !== deviceId) return null;
