@@ -887,7 +887,7 @@ export default function Status() {
                                   {deviceLogs.map((l, i) => renderLogItem(l, i, d))}
                                 </div>
                               ) : (
-                                <div className={css(styles.noLogs)}>{mqttConnected ? 'Rubbish Detected'}</div>
+                                <div className={css(styles.noLogs)}>Rubbish Detected</div>
                               )}
                             </div>
                           </td>
