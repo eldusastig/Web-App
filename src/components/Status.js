@@ -489,62 +489,50 @@ export default function Status() {
 
   // ── Manual entry form ─────────────────────────────────────────────────────
   const renderManualForm = (deviceId) => {
-    if (manualFormOpen !== deviceId) return null;
-    return (
-      <div className={css(styles.manualForm)} onClick={(e) => e.stopPropagation()}>
-        <div className={css(styles.manualFormRow)}>
-          <label className={css(styles.manualLabel)}>Date</label>
-          <input
-            type="date"
-            className={css(styles.manualInput)}
-            value={manualDate}
-            onChange={(e) => setManualDate(e.target.value)}
-          />
-        </div>
-        <div className={css(styles.manualFormRow)}>
-          <label className={css(styles.manualLabel)}>Time</label>
-          <input
-            type="time"
-            step="1"
-            className={css(styles.manualInput)}
-            value={manualTime}
-            onChange={(e) => setManualTime(e.target.value)}
-          />
-        </div>
-        <div className={css(styles.manualFormRow)}>
-          <label className={css(styles.manualLabel)}>Detection</label>
-          <select
-            className={css(styles.manualSelect)}
-            value={manualType}
-            onChange={(e) => setManualType(e.target.value)}
-          >
-            <option value="Rubbish Detected">🗑️ Rubbish Detected</option>
-            <option value="Animal Detected">🐾 Animal Detected</option>
-            <option value="None">✅ None (clear)</option>
-          </select>
-        </div>
-        <div className={css(styles.manualFormPreview)}>
-          Preview: <strong>{buildDisplayTs(manualDate, manualTime)}</strong> — <strong>{manualType}</strong>
-        </div>
-        <div className={css(styles.manualFormActions)}>
-          <button
-            type="button"
-            className={css(styles.manualSubmitBtn)}
-            onClick={(e) => submitManualEntry(deviceId, e)}
-          >
-            Add Entry
-          </button>
-          <button
-            type="button"
-            className={css(styles.cancelBtn)}
-            onClick={closeManualForm}
-          >
-            Cancel
-          </button>
-        </div>
+  if (manualFormOpen !== deviceId) return null;
+  return (
+    <div className={css(styles.manualForm)} onClick={(e) => e.stopPropagation()}>
+      <div className={css(styles.manualFormRow)}>
+        <label className={css(styles.manualLabel)}>Date</label>
+        <input
+          type="date"
+          className={css(styles.manualInput)}
+          value={manualDate}
+          onChange={(e) => setManualDate(e.target.value)}
+        />
       </div>
-    );
-  };
+      <div className={css(styles.manualFormRow)}>
+        <label className={css(styles.manualLabel)}>Time</label>
+        <input
+          type="time"
+          step="1"
+          className={css(styles.manualInput)}
+          value={manualTime}
+          onChange={(e) => setManualTime(e.target.value)}
+        />
+      </div>
+      <div className={css(styles.manualFormPreview)}>
+        Preview: <strong>{buildDisplayTs(manualDate, manualTime)}</strong> — <strong>Rubbish Detected</strong>
+      </div>
+      <div className={css(styles.manualFormActions)}>
+        <button
+          type="button"
+          className={css(styles.manualSubmitBtn)}
+          onClick={(e) => submitManualEntry(deviceId, e)}
+        >
+          Add Entry
+        </button>
+        <button
+          type="button"
+          className={css(styles.cancelBtn)}
+          onClick={closeManualForm}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+};
 
   // ---------------------------
   // Logs loading (MQTT-backed)
@@ -877,13 +865,15 @@ export default function Status() {
                               <div className={css(styles.panelHeader)}>
                                 <strong>Detection Logs</strong>
                                 <span className={css(styles.panelSub)}>Device {d.id}</span>
-                                <button
-                                  type="button"
-                                  className={css(styles.addManualBtn)}
-                                  onClick={(e) => { e.stopPropagation(); openManualForm(d.id, e); }}
-                                >
-                                  + Add Manual Entry
-                                </button>
+                                {getMergedLogs(d).some(l => getClassLabel(l) === 'Awaiting Detections') && (
+                                 <button
+                                    type="button"
+                                    className={css(styles.addManualBtn)}
+                                    onClick={(e) => { e.stopPropagation(); openManualForm(d.id, e); }}
+                                      >
+                                        + Add Manual Entry
+                                      </button>
+                                  )}
                               </div>
 
                               {renderManualForm(d.id)}
