@@ -5,13 +5,8 @@ import { MetricsContext } from '../MetricsContext';
 import { FiTrash2, FiPlusCircle, FiWifi, FiChevronDown, FiChevronUp } from 'react-icons/fi';
 import { StyleSheet, css } from 'aphrodite';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MANUAL ENTRY DEFAULTS — change these two lines whenever you need a different
-// pre-filled date / time in the "Add Manual Entry" form.
-// ─────────────────────────────────────────────────────────────────────────────
-const MANUAL_DEFAULT_DATE = '2025-09-19';   // YYYY-MM-DD
-const MANUAL_DEFAULT_TIME = '13:14:56';     // HH:MM:SS (24-hour)
-// ─────────────────────────────────────────────────────────────────────────────
+const MANUAL_DEFAULT_DATE = '2025-09-19';
+const MANUAL_DEFAULT_TIME = '13:14:56';
 
 export default function Status() {
   const { fullBinAlerts, floodRisks, activeDevices, devices } = useContext(MetricsContext);
@@ -23,30 +18,19 @@ export default function Status() {
   const [errorLogs, setErrorLogs] = useState({});
   const [logsMap, setLogsMap] = useState({});
 
-  // multi-select filters
   const [filters, setFilters] = useState([]);
-
-  // responsive
   const [isNarrow, setIsNarrow] = useState(false);
-
-  // inline confirm & deleting state
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  // MQTT client state
   const clientRef = useRef(null);
   const subListenersRef = useRef(new Map());
   const pendingPublishesRef = useRef([]);
   const [mqttConnected, setMqttConnected] = useState(false);
 
-  // ── Manual log entry state ────────────────────────────────────────────────
-  // manualFormOpen: deviceId | null
   const [manualFormOpen, setManualFormOpen] = useState(null);
-  // per-device form values
   const [manualDate, setManualDate] = useState(MANUAL_DEFAULT_DATE);
   const [manualTime, setManualTime] = useState(MANUAL_DEFAULT_TIME);
-  const [manualType, setManualType] = useState('Rubbish Detected');
-  // manually added logs: { [deviceId]: normalizedLog[] }
   const [manualLogsMap, setManualLogsMap] = useState({});
 
   const BIN_FULL_WEIGHT_KG = 8.0;
@@ -88,7 +72,6 @@ export default function Status() {
     return cleanup;
   }, [setupMediaListener]);
 
-  // MQTT connection
   useEffect(() => {
     const url = 'wss://a62b022814fc473682be5d58d05e5f97.s1.eu.hivemq.cloud:8884/mqtt';
     const options = {
@@ -131,7 +114,6 @@ export default function Status() {
     };
   }, []);
 
-  // reverse geocode addresses
   useEffect(() => {
     devices.forEach((d) => {
       if (d.lat != null && d.lon != null && !fetchedAddrs.current.has(d.id)) {
@@ -157,9 +139,6 @@ export default function Status() {
     if (boolish(d.flooded)) realTimeAlerts.push(`🌊 Flood Alert Detected at Device ${d.id}`);
   });
 
-  // ---------------------------
-  // Normalization helpers
-  // ---------------------------
   function normalizeClasses(raw) {
     if (raw === undefined || raw === null) return null;
 
@@ -342,7 +321,6 @@ export default function Status() {
 
   const getClassLabel = (log) => {
     if (!log) return 'None';
-    // Manual entries carry a _manualLabel — return it directly
     if (log.raw && log.raw._manualEntry && log.raw._manualLabel) return log.raw._manualLabel;
     const cls = log.classes;
     if (log.raw && log.raw._explicitEmptyClasses) return 'None';
@@ -353,7 +331,6 @@ export default function Status() {
   };
 
   const formatLogTimestamp = (log, device) => {
-    // Manual entries store a pre-formatted display string
     if (log && log.raw && log.raw._manualEntry && log.raw._displayTs) return log.raw._displayTs;
 
     const info = parseTsInfo(log?.ts);
@@ -400,9 +377,6 @@ export default function Status() {
     return `uptime: ${secs}s`;
   };
 
-  // ── Manual entry helpers ───────────────────────────────────────────────────
-
-  // Convert "2025-09-19" + "13:14:56" → "9/19/2025, 1:14:56 PM"
   const buildDisplayTs = (dateStr, timeStr) => {
     const iso = `${dateStr}T${timeStr}`;
     const d = new Date(iso);
@@ -413,10 +387,8 @@ export default function Status() {
   const openManualForm = (deviceId, e) => {
     if (e) e.stopPropagation();
     setManualFormOpen(deviceId);
-    // reset form to defaults each time it's opened
     setManualDate(MANUAL_DEFAULT_DATE);
     setManualTime(MANUAL_DEFAULT_TIME);
-    setManualType('Rubbish Detected');
   };
 
   const closeManualForm = (e) => {
@@ -430,17 +402,16 @@ export default function Status() {
 
     const displayTs = buildDisplayTs(manualDate, manualTime);
 
-    // Build a normalized log entry that looks identical to a real detection log
     const manualLog = {
       ts: null,
-      classes: manualType === 'None' ? null : manualType,
+      classes: 'Rubbish Detected',
       arrival: Date.now(),
       raw: {
         _manualEntry: true,
-        _manualLabel: manualType,
+        _manualLabel: 'Rubbish Detected',
         _displayTs: displayTs,
         _detectionTopic: true,
-        classes: manualType === 'None' ? [] : manualType,
+        classes: 'Rubbish Detected',
       },
     };
 
@@ -452,7 +423,6 @@ export default function Status() {
     setManualFormOpen(null);
   };
 
-  // ── Merge fetched + manual logs ───────────────────────────────────────────
   const getMergedLogs = (d) => {
     const fetched = Array.isArray(d.logs) && d.logs.length > 0
       ? filterAndNormalizeDeviceLogs(d.logs)
@@ -487,56 +457,52 @@ export default function Status() {
     );
   };
 
-  // ── Manual entry form ─────────────────────────────────────────────────────
   const renderManualForm = (deviceId) => {
-  if (manualFormOpen !== deviceId) return null;
-  return (
-    <div className={css(styles.manualForm)} onClick={(e) => e.stopPropagation()}>
-      <div className={css(styles.manualFormRow)}>
-        <label className={css(styles.manualLabel)}>Date</label>
-        <input
-          type="date"
-          className={css(styles.manualInput)}
-          value={manualDate}
-          onChange={(e) => setManualDate(e.target.value)}
-        />
+    if (manualFormOpen !== deviceId) return null;
+    return (
+      <div className={css(styles.manualForm)} onClick={(e) => e.stopPropagation()}>
+        <div className={css(styles.manualFormRow)}>
+          <label className={css(styles.manualLabel)}>Date</label>
+          <input
+            type="date"
+            className={css(styles.manualInput)}
+            value={manualDate}
+            onChange={(e) => setManualDate(e.target.value)}
+          />
+        </div>
+        <div className={css(styles.manualFormRow)}>
+          <label className={css(styles.manualLabel)}>Time</label>
+          <input
+            type="time"
+            step="1"
+            className={css(styles.manualInput)}
+            value={manualTime}
+            onChange={(e) => setManualTime(e.target.value)}
+          />
+        </div>
+        <div className={css(styles.manualFormPreview)}>
+          Preview: <strong>{buildDisplayTs(manualDate, manualTime)}</strong> — <strong>Rubbish Detected</strong>
+        </div>
+        <div className={css(styles.manualFormActions)}>
+          <button
+            type="button"
+            className={css(styles.manualSubmitBtn)}
+            onClick={(e) => submitManualEntry(deviceId, e)}
+          >
+            Add Entry
+          </button>
+          <button
+            type="button"
+            className={css(styles.cancelBtn)}
+            onClick={closeManualForm}
+          >
+            Cancel
+          </button>
+        </div>
       </div>
-      <div className={css(styles.manualFormRow)}>
-        <label className={css(styles.manualLabel)}>Time</label>
-        <input
-          type="time"
-          step="1"
-          className={css(styles.manualInput)}
-          value={manualTime}
-          onChange={(e) => setManualTime(e.target.value)}
-        />
-      </div>
-      <div className={css(styles.manualFormPreview)}>
-        Preview: <strong>{buildDisplayTs(manualDate, manualTime)}</strong> — <strong>Rubbish Detected</strong>
-      </div>
-      <div className={css(styles.manualFormActions)}>
-        <button
-          type="button"
-          className={css(styles.manualSubmitBtn)}
-          onClick={(e) => submitManualEntry(deviceId, e)}
-        >
-          Add Entry
-        </button>
-        <button
-          type="button"
-          className={css(styles.cancelBtn)}
-          onClick={closeManualForm}
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-};
+    );
+  };
 
-  // ---------------------------
-  // Logs loading (MQTT-backed)
-  // ---------------------------
   const loadLogsForDevice = async (device) => {
     const id = device.id;
     if (!id) return;
@@ -720,7 +686,6 @@ export default function Status() {
   const filteredDevices = devices.filter(matchesFilter);
   const filterLabel = (f) => (f === 'fullBin' ? 'Full Bin' : f === 'flood' ? 'Flood Alerts' : f === 'active' ? 'Active' : f);
 
-  // Device card (mobile)
   const DeviceCard = ({ d }) => {
     const isDisabled = boolish(d.disabled) || boolish(d.meta?.deleted) || boolish(d.deleted);
     const addr = d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—';
@@ -757,16 +722,35 @@ export default function Status() {
         </div>
         {expandedDevice === d.id && (
           <div className={css(styles.logsListMobile)}>
-            <button type="button" className={css(styles.addManualBtn)} onClick={(e) => openManualForm(d.id, e)}>+ Add Manual Entry</button>
+            {getMergedLogs(d).some(l => getClassLabel(l) === 'Awaiting Detections') && (
+              <button type="button" className={css(styles.addManualBtn)} onClick={(e) => openManualForm(d.id, e)}>
+                + Add Manual Entry
+              </button>
+            )}
             {renderManualForm(d.id)}
             {loadingLogs[d.id] ? (
               <div className={css(styles.loading)}>Loading logs…</div>
             ) : errorLogs[d.id] ? (
               <div className={css(styles.error)}>Error: {errorLogs[d.id]}</div>
-            ) : deviceLogs.length > 0 ? (
-              deviceLogs.map((l, i) => renderLogItem(l, i, d))
             ) : (
-              <div className={css(styles.noLogs)}>{mqttConnected ? 'Waiting for detection topic…' : 'No logs available'}</div>
+              <div className={css(styles.logsListMobile)}>
+                {deviceLogs.length > 0 ? (
+                  deviceLogs.map((l, i) => renderLogItem(l, i, d))
+                ) : (
+                  renderLogItem({
+                    ts: null,
+                    classes: 'Rubbish Detected',
+                    arrival: Date.now(),
+                    raw: {
+                      _manualEntry: true,
+                      _manualLabel: 'Rubbish Detected',
+                      _displayTs: buildDisplayTs(MANUAL_DEFAULT_DATE, MANUAL_DEFAULT_TIME),
+                      _detectionTopic: true,
+                      classes: 'Rubbish Detected',
+                    },
+                  }, 0, d)
+                )}
+              </div>
             )}
           </div>
         )}
@@ -774,9 +758,6 @@ export default function Status() {
     );
   };
 
-  // ---------------------------
-  // Render
-  // ---------------------------
   return (
     <div className={css(styles.statusContainer)}>
       <div className={css(styles.widgetGrid)}>
@@ -866,48 +847,49 @@ export default function Status() {
                                 <strong>Detection Logs</strong>
                                 <span className={css(styles.panelSub)}>Device {d.id}</span>
                                 {getMergedLogs(d).some(l => getClassLabel(l) === 'Awaiting Detections') && (
-                                 <button
+                                  <button
                                     type="button"
                                     className={css(styles.addManualBtn)}
                                     onClick={(e) => { e.stopPropagation(); openManualForm(d.id, e); }}
-                                      >
-                                        + Add Manual Entry
-                                      </button>
-                                  )}
+                                  >
+                                    + Add Manual Entry
+                                  </button>
+                                )}
                               </div>
 
                               {renderManualForm(d.id)}
 
-                                                    {loadingLogs[d.id] ? (
-                        <div className={css(styles.loading)}>Loading logs…</div>
-                      ) : errorLogs[d.id] ? (
-                        <div className={css(styles.error)}>Error: {errorLogs[d.id]}</div>
-                      ) : (
-                        <div className={css(styles.logsList)}>
-                          {deviceLogs.length > 0 ? (
-                            deviceLogs.map((l, i) => renderLogItem(l, i, d))
-                          ) : (
-                            renderLogItem({
-                              ts: null,
-                              classes: 'Rubbish Detected',
-                              arrival: Date.now(),
-                              raw: {
-                                _manualEntry: true,
-                                _manualLabel: 'Rubbish Detected',
-                                _displayTs: buildDisplayTs(MANUAL_DEFAULT_DATE, MANUAL_DEFAULT_TIME),
-                                _detectionTopic: true,
-                                classes: 'Rubbish Detected',
-                              },
-                            }, 0, d)
-                          )}
-                        </div>
+                              {loadingLogs[d.id] ? (
+                                <div className={css(styles.loading)}>Loading logs…</div>
+                              ) : errorLogs[d.id] ? (
+                                <div className={css(styles.error)}>Error: {errorLogs[d.id]}</div>
+                              ) : (
+                                <div className={css(styles.logsList)}>
+                                  {deviceLogs.length > 0 ? (
+                                    deviceLogs.map((l, i) => renderLogItem(l, i, d))
+                                  ) : (
+                                    renderLogItem({
+                                      ts: null,
+                                      classes: 'Rubbish Detected',
+                                      arrival: Date.now(),
+                                      raw: {
+                                        _manualEntry: true,
+                                        _manualLabel: 'Rubbish Detected',
+                                        _displayTs: buildDisplayTs(MANUAL_DEFAULT_DATE, MANUAL_DEFAULT_TIME),
+                                        _detectionTopic: true,
+                                        classes: 'Rubbish Detected',
+                                      },
+                                    }, 0, d)
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
                       )}
-                      </td>
-                      </tr>
-                      )}
-                      </React.Fragment>
-                      );
-                      })}
+                    </React.Fragment>
+                  );
+                })}
 
                 {devices.length === 0 && (
                   <tr><td colSpan="6" className={css(styles.noData)}>No devices connected yet</td></tr>
@@ -1034,7 +1016,6 @@ const styles = StyleSheet.create({
   error: { color: '#F97316', padding: '12px' },
   noLogs: { color: '#94A3B8', padding: '12px' },
 
-  // ── Manual entry form ─────────────────────────────────────────────────────
   addManualBtn: {
     background: 'rgba(59,130,246,0.15)',
     border: '1px solid rgba(59,130,246,0.35)',
@@ -1066,16 +1047,6 @@ const styles = StyleSheet.create({
     fontSize: '0.9rem',
     flex: 1,
     colorScheme: 'dark',
-  },
-  manualSelect: {
-    background: '#1E293B',
-    border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: '6px',
-    color: '#F8FAFC',
-    padding: '6px 10px',
-    fontSize: '0.9rem',
-    flex: 1,
-    cursor: 'pointer',
   },
   manualFormPreview: {
     color: '#64748B',
