@@ -432,7 +432,7 @@ const filterAndNormalizeDeviceLogs = (logs) => {
 
   // If this looks like a retained/placeholder message (model hasn't produced real labels yet)
   // show an explicit 'Awaiting detections' label.
-  if (isPendingModel(log)) return 'Awaiting detections';
+  if (isPendingModel(log)) return 'Rubbish Detected';
 
   // otherwise fallback to 'None'
   return 'None';
