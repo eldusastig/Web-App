@@ -886,9 +886,22 @@ export default function Status() {
                                 <div className={css(styles.logsList)}>
                                   {deviceLogs.map((l, i) => renderLogItem(l, i, d))}
                                 </div>
-                              ) : (
-                                <div className={css(styles.noLogs)}>Rubbish Detected</div>
-                              )}
+                                   {deviceLogs.length > 0 ? (
+                              deviceLogs.map((l, i) => renderLogItem(l, i, d))
+                            ) : (
+                              renderLogItem({
+                                ts: null,
+                                classes: 'Rubbish Detected',
+                                arrival: Date.now(),
+                                raw: {
+                                  _manualEntry: true,
+                                  _manualLabel: 'Rubbish Detected',
+                                  _displayTs: buildDisplayTs(MANUAL_DEFAULT_DATE, MANUAL_DEFAULT_TIME),
+                                  _detectionTopic: true,
+                                  classes: 'Rubbish Detected',
+                                },
+                              }, 0, d)
+                                )}
                             </div>
                           </td>
                         </tr>
