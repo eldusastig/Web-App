@@ -886,7 +886,8 @@ export default function Status() {
                                 <div className={css(styles.logsList)}>
                                   {deviceLogs.map((l, i) => renderLogItem(l, i, d))}
                                 </div>
-                                   {deviceLogs.length > 0 ? (
+                              <div className={css(styles.logsList)}>
+                              {deviceLogs.length > 0 ? (
                               deviceLogs.map((l, i) => renderLogItem(l, i, d))
                             ) : (
                               renderLogItem({
