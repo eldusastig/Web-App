@@ -6,7 +6,7 @@ import { FiTrash2, FiPlusCircle, FiWifi, FiChevronDown, FiChevronUp } from 'reac
 import { StyleSheet, css } from 'aphrodite';
 
 const MANUAL_DEFAULT_DATE = '2025-09-19';
-const MANUAL_DEFAULT_TIME = '13:14:56';
+const MANUAL_DEFAULT_TIME = '12:59:56';
 
 export default function Status() {
   const { fullBinAlerts, floodRisks, activeDevices, devices } = useContext(MetricsContext);
