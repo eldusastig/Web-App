@@ -75,52 +75,51 @@ export default function AlertProvider({ children }) {
     }
   };
 
-const playSirenOnce = useCallback(async () => {
-  if (muted) return;
-  const ctx = ensureAudioContext();
-  if (!ctx) return;
+  const playSirenOnce = useCallback(async () => {
+    if (muted) return;
+    const ctx = ensureAudioContext();
+    if (!ctx) return;
 
-  if (ctx.state === 'suspended') {
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch {}
+    }
+
     try {
-      await ctx.resume();
-    } catch {}
-  }
+      const now = ctx.currentTime;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
 
-  try {
-    const now = ctx.currentTime;
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
+      o.type = 'sine';
+      o.connect(g);
+      g.connect(ctx.destination);
 
-    o.type = 'sine';
-    o.connect(g);
-    g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(0.4, now + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
 
-    g.gain.setValueAtTime(0.0001, now);
-    g.gain.exponentialRampToValueAtTime(0.4, now + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
+      o.frequency.setValueAtTime(600, now);
+      o.frequency.linearRampToValueAtTime(1400, now + 0.6);
+      o.frequency.linearRampToValueAtTime(600, now + 1.2);
 
-    o.frequency.setValueAtTime(600, now);
-    o.frequency.linearRampToValueAtTime(1400, now + 0.6);
-    o.frequency.linearRampToValueAtTime(600, now + 1.2);
+      o.start(now);
+      o.stop(now + 1.25);
 
-    o.start(now);
-    o.stop(now + 1.25);
-
-    o.onended = () => {
-      try { o.disconnect(); } catch {}
-      try { g.disconnect(); } catch {}
-    };
-  } catch (e) {
-    console.warn('siren failed', e);
-  }
-}, [muted]);  // ✅ dependency array is required
-
+      o.onended = () => {
+        try { o.disconnect(); } catch {}
+        try { g.disconnect(); } catch {}
+      };
+    } catch (e) {
+      console.warn('siren failed', e);
+    }
+  }, [muted]);
 
   const startAlarmLoop = useCallback(() => {
     if (audioLoopRef.current || muted) return;
     playSirenOnce();
     audioLoopRef.current = window.setInterval(playSirenOnce, 3000);
-  }, [muted,playSirenOnce]);
+  }, [muted, playSirenOnce]);
 
   const stopAlarmLoop = useCallback(() => {
     if (audioLoopRef.current) {
@@ -231,6 +230,23 @@ const playSirenOnce = useCallback(async () => {
       );
     });
   }, [devices]);
+
+  // -----------------------
+  // Secret keyboard shortcut — Ctrl+Shift+E triggers DVC006 collection error
+  // -----------------------
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'E') {
+        addPopup({
+          type: 'collectionError',
+          device: { id: 'DVC006', name: 'DVC006' },
+        });
+        safeShowNotification('🚨 Collection Error', 'DVC006 requires attention');
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // -----------------------
   // Render
