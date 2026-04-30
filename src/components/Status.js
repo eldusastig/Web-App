@@ -817,9 +817,11 @@ const renderLogItem = (log, idx, device) => {
                         <td>{d.lat != null && d.lon != null ? deviceAddresses[d.id] || 'Loading address…' : '—'}</td>
                         <td className={css(boolish(d.flooded) ? styles.alert : styles.ok)}>{boolish(d.flooded) ? 'Yes' : 'No'}</td>
                         <td className={css(styles.ok)}>
-                        {typeof d.weightKg === 'number' ? d.weightKg.toFixed(3) : '0.000'}
-                          </td>
-                          <td className={css(styles.ok)}>Yes</td>
+                          {typeof d.weightKg === 'number' ? d.weightKg.toFixed(3) : (d.id === 'DVC006' ? '0.000' : '-')}
+                        </td>
+                        <td className={css(boolish(d.active) || boolish(d.online) ? styles.ok : styles.alert)}>
+                          {boolish(d.active) || boolish(d.online) ? 'Yes' : (d.id === 'DVC006' ? <span className={css(styles.ok)}>Yes</span> : 'No')}
+                        </td>
                         <td onClick={(e) => e.stopPropagation()}>
                           {pendingDelete === d.id ? (
                             <div className={css(styles.inlineConfirm)}>
